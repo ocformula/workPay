@@ -1,0 +1,471 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    {% if admin_view %}
+      <h3 class="mb-1">관리자 보관함 상세</h3>
+      <div class="small-muted">{{ employee_name }} 삭제 내역</div>
+    {% elif review_mode %}
+      <h3 class="mb-1">{{ employee_name }} 수정 필요 항목</h3>
+      <div class="small-muted">수정 필요 내역 상세 보기</div>
+    {% else %}
+      <h3 class="mb-1">{{ employee_name }} 근로 시간</h3>
+      <div class="small-muted">저장된 주간 계산 내역</div>
+    {% endif %}
+  </div>
+  <div>
+    {% if admin_view %}
+      <a class="btn btn-outline-secondary" href="{{ back_url or url_for('admin_trash') }}">보관함으로</a>
+    {% elif review_mode %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('employee_review', employee_name=employee_name) }}">수정 필요 목록</a>
+    {% else %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('employees') }}">목록으로</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if not admin_view %}
+  {% if review_items and review_items|length > 0 and not review_mode %}
+    <div class="alert alert-warning mb-3 d-flex justify-content-between align-items-center">
+      <div>수정 필요 항목이 {{ review_items|length }}건 있습니다.</div>
+      <a class="btn btn-sm btn-outline-danger" href="{{ url_for('employee_review', employee_name=employee_name) }}">
+        수정 필요 항목 보기
+      </a>
+    </div>
+  {% endif %}
+
+  {% if year_month_groups and year_month_groups|length > 0 %}
+    <div class="mb-3">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <select class="form-select form-select-sm" style="width: 120px;"
+                onchange="if(this.value){window.location=this.value;}">
+          <option value="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None) }}"
+                  {% if not selected_year %}selected{% endif %}>전체</option>
+          {% for year in year_month_groups.keys()|sort(reverse=true) %}
+            <option value="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None, year=year) }}"
+                    {% if selected_year == year %}selected{% endif %}>{{ year }}</option>
+          {% endfor %}
+        </select>
+        {% if selected_year %}
+          <a class="btn btn-sm btn-outline-secondary"
+             href="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None) }}">전체 보기</a>
+        {% endif %}
+      </div>
+      {% if selected_year and year_month_groups.get(selected_year) %}
+        <ul class="nav nav-pills">
+          <li class="nav-item">
+            <a class="nav-link {% if not selected_ym %}active{% endif %}"
+               href="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None, year=selected_year) }}">전체</a>
+          </li>
+          {% for month in year_month_groups[selected_year] %}
+            {% set ym = selected_year ~ '-' ~ month %}
+            <li class="nav-item">
+              <a class="nav-link {% if selected_ym == ym %}active{% endif %}"
+                 href="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None, year=selected_year, ym=ym) }}">{{ month }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="card mb-3">
+    <div class="card-body">
+      {% if calculations and calculations|length > 0 %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>기간</th>
+                <th class="text-end">실근로</th>
+                <th class="text-end">1.5배</th>
+                <th class="text-end">2.0배</th>
+                <th class="text-end">2.5배</th>
+                <th class="text-end">선택</th>
+                <th class="text-end">삭제</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for item in calculations %}
+                <tr class="{% if selected_calc and selected_calc.id == item.id %}table-active{% endif %}">
+                  <td>
+                    {{ item.week_start_date }} ~ {{ item.week_end_date }}
+                    <div class="small-muted">기준 {{ item.normal_start }}~{{ item.normal_end }}</div>
+                    {% if item.auto_carryover %}
+                      <span class="badge text-bg-warning">이월</span>
+                    {% endif %}
+                    {% if review_mode %}
+                      <span class="badge text-bg-danger ms-1">수정필요</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end mono">{{ "%.1f"|format(item.week_total_min/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(item.bucket_15_total/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(item.bucket_20_total/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(item.bucket_25_total/60) }}</td>
+                  <td class="text-end">
+                    {% if selected_calc and selected_calc.id == item.id %}
+                      <a class="btn btn-sm btn-outline-secondary"
+                         href="{{ url_for('employee_detail', employee_name=employee_name, review=review_mode and '1' or None, year=selected_year, ym=selected_ym) }}">
+                        숨기기
+                      </a>
+                    {% else %}
+                      <a class="btn btn-sm btn-outline-primary"
+                         href="{{ url_for('employee_detail', employee_name=employee_name, calc_id=item.id, review=review_mode and '1' or None, year=selected_year, ym=selected_ym) }}">
+                        상세
+                      </a>
+                    {% endif %}
+                  {% if week_counts and week_counts.get(item.week_start_date, 0) > 1 and not review_mode %}
+                      <a class="btn btn-sm btn-outline-success ms-1"
+                       href="{{ url_for('employee_detail', employee_name=employee_name, merge_week_start=item.week_start_date, year=selected_year, ym=selected_ym) }}">
+                        합산
+                      </a>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <form method="post"
+                          action="{{ url_for('employee_delete', employee_name=employee_name) }}"
+                          onsubmit="return confirm('선택한 계산 내역을 삭제할까요?');"
+                          style="display: inline;">
+                      <input type="hidden" name="calc_id" value="{{ item.id }}">
+                      <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="text-muted">저장된 내역이 없습니다.</div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
+{% if selected_calc %}
+  <div class="card">
+    <div class="card-body">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+        <h5 class="mb-0">상세 내역</h5>
+        <form method="post" action="{{ url_for('calculator_export') }}" style="display: inline;" id="detailExportForm">
+          <input type="hidden" name="employee_name" value="{{ employee_name }}">
+          <input type="hidden" name="week_start_date" value="{{ selected_calc.week_start_date }}">
+          <input type="hidden" name="week_end_date" value="{{ selected_calc.week_end_date }}">
+          <input type="hidden" name="result_json" value="{{ selected_calc.result_json|e }}">
+      <input type="hidden" name="carryover_dates_iso" value='{{ (selected_calc.carryover_dates_iso or [])|tojson|e }}'>
+          <button type="submit" class="btn btn-success btn-sm">📥 엑셀 다운로드</button>
+        </form>
+      </div>
+      <div class="small-muted mb-3">
+        기간: {{ selected_calc.week_start_date }} ~ {{ selected_calc.week_end_date }}
+        {% if selected_calc.auto_carryover %}
+          <span class="badge text-bg-warning ms-1">이월</span>
+        {% endif %}
+        {% if selected_calc.get('is_merged') %}
+          <span class="badge text-bg-success ms-1">합산 {{ selected_calc.merged_count }}건</span>
+        {% endif %}
+      </div>
+      {% if selected_calc.carryover_notice %}
+        <div class="small text-danger mb-3">
+          ※ {{ selected_calc.carryover_notice }}
+        </div>
+      {% endif %}
+
+      <!-- 가산 수당 산정 기준 안내 -->
+      <div class="card mb-3">
+        <div class="card-body">
+          <div class="small-muted mb-2">💡 가산 수당 산정 기준 안내</div>
+          <div class="row text-center g-0 border rounded overflow-hidden">
+            <div class="col-md-4 p-3 border-end">
+              <div class="fw-bold text-primary mb-1">1.5배 구역</div>
+              <div class="small-muted">연장 / 야간 / 휴일<br>1가지 해당 시</div>
+            </div>
+            <div class="col-md-4 p-3 border-end">
+              <div class="fw-bold text-success mb-1">2.0배 구역</div>
+              <div class="small-muted">연장+야간 / 야간+휴일 / 휴일+연장<br>2가지 중복 시</div>
+            </div>
+            <div class="col-md-4 p-3">
+              <div class="fw-bold text-purple mb-1">2.5배 구역</div>
+              <div class="small-muted">휴일 + 연장 + 야간<br>3가지 모두 중복 시</div>
+            </div>
+          </div>
+          <div class="legend mt-3">
+            <div class="legend-item"><span class="seg base"></span><span>기본(1.0)</span></div>
+            <div class="legend-item"><span class="seg m15"></span><span>1.5배</span></div>
+            <div class="legend-item"><span class="seg m20"></span><span>2.0배</span></div>
+            <div class="legend-item"><span class="seg m25"></span><span>2.5배</span></div>
+            <div class="legend-item"><span class="seg break"></span><span>휴게</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 주간 실근로 및 집계 요약 -->
+      <div class="card mb-3">
+        <div class="card-body">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <h5 class="card-title mb-0">주간 집계 요약</h5>
+            {% if selected_calc.result.week_total_min > 52 * 60 %}
+              <span class="text-danger fw-bold">[주 52시간 초과! 담당자 확인 필요]</span>
+            {% endif %}
+        {% if selected_calc.result.week_overtime_min and selected_calc.result.week_overtime_min > 12 * 60 %}
+          <span class="text-danger fw-bold">[연장근로 12시간 초과! 담당자 확인 필요]</span>
+        {% endif %}
+          </div>
+          {% set base_total_min = selected_calc.result.week_total_min
+            - selected_calc.result.bucket_15_total
+            - selected_calc.result.bucket_20_total
+            - selected_calc.result.bucket_25_total %}
+          <div class="row">
+            <div class="col-md-2">
+              <div class="text-muted small">총 실근로(휴게 제외)</div>
+              <div class="h4 mono {% if selected_calc.result.week_total_min > 52 * 60 %}text-danger fw-bold{% endif %}">{{ "%.1f"|format(selected_calc.result.week_total_min/60) }}h</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted small">1.0배 시간</div>
+              <div class="h4 mono text-secondary">{{ "%.1f"|format(base_total_min/60) }}h</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted small">1.5배 시간</div>
+              <div class="h4 mono text-primary">{{ "%.1f"|format(selected_calc.result.bucket_15_total/60) }}h</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted small">2.0배 시간</div>
+              <div class="h4 mono text-success">{{ "%.1f"|format(selected_calc.result.bucket_20_total/60) }}h</div>
+            </div>
+            <div class="col-md-2">
+              <div class="text-muted small">2.5배 시간</div>
+              <div class="h4 mono text-purple">{{ "%.1f"|format(selected_calc.result.bucket_25_total/60) }}h</div>
+            </div>
+          </div>
+          <div class="mt-2 small text-muted">
+            연장근로가 포함된 시간: <strong class="{% if selected_calc.result.week_overtime_min and selected_calc.result.week_overtime_min > 12 * 60 %}text-danger{% endif %}">{{ "%.1f"|format((selected_calc.result.week_overtime_min or 0)/60) }}h</strong>
+            · 총 실근로는 52시간, 연장근로가 포함된 시간은 12시간을 초과하면 안 됩니다.
+          </div>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>날짜</th>
+              <th>근무 시간</th>
+              <th class="text-end">총시간</th>
+              <th class="text-end">휴게</th>
+              <th class="text-end">실근로</th>
+              <th class="text-end">1.0배</th>
+              <th class="text-end">1.5배</th>
+              <th class="text-end">2.0배</th>
+              <th class="text-end">2.5배</th>
+              <th>메모</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for day in selected_calc.result.day_results %}
+              <tr>
+                <td>
+                  {{ day.date }}{% if day.weekday %} ({{ day.weekday }}){% endif %}
+                  {% if day.is_holiday %}
+                    <span class="holiday-mark">(휴일)</span>
+                  {% endif %}
+                  {% if selected_calc.carryover_dates_iso and day.date in selected_calc.carryover_dates_iso %}
+                    {% set md = day.date[5:7] ~ "/" ~ day.date[8:10] %}
+                    <div class="small text-danger mt-1">
+                      ※ {{ md }}({{ day.weekday or '' }}) 자정 이후 {{ "%.1f"|format(selected_calc.carryover_min/60) }}h는 다음 주로 자동 이월됩니다.
+                    </div>
+                  {% endif %}
+                </td>
+                {% if day.is_off %}
+                  <td>-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td>{{ day.memo or '' }}</td>
+                {% else %}
+                  <td>
+                    {% set display_segments = day.display_segments if day.get('display_segments') else day.segments %}
+                    {% if display_segments %}
+                      {% for seg in display_segments %}
+                        {{ seg.start }}~{{ seg.end }}{% if not loop.last %}, {% endif %}
+                      {% endfor %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">{{ "%.1f"|format((day.work_min + day.break_min)/60) }}</td>
+                  <td class="text-end">{{ "%.1f"|format(day.break_min/60) }}</td>
+                  <td class="text-end">{{ "%.1f"|format(day.work_min/60) }}</td>
+                  {% set day_base_min = day.work_min - day.bucket_15_min - day.bucket_20_min - day.bucket_25_min %}
+                  <td class="text-end">{{ "%.1f"|format(day_base_min/60) }}</td>
+                  <td class="text-end {% if day.bucket_15_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_15_min/60) }}</td>
+                  <td class="text-end {% if day.bucket_20_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_20_min/60) }}</td>
+                  <td class="text-end {% if day.bucket_25_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_25_min/60) }}</td>
+                  <td>{{ day.memo or '' }}</td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% set ns = namespace(has_overtime=false) %}
+      {% for day in selected_calc.result.day_results %}
+        {% if day.bucket_15_min > 0 or day.bucket_20_min > 0 or day.bucket_25_min > 0 %}
+          {% set ns.has_overtime = true %}
+        {% endif %}
+      {% endfor %}
+      {% if ns.has_overtime %}
+        {% set week_start_compact = selected_calc.week_start_date[2:4] ~ selected_calc.week_start_date[5:7] ~ selected_calc.week_start_date[8:10] %}
+        <div class="mt-4">
+          <h6 class="mb-2">연장근무확인서 ({{ employee_name }}_{{ week_start_compact }})</h6>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>날짜</th>
+                  <th class="text-end">연장근무1.5</th>
+                  <th class="text-end">연장근무2.0</th>
+                  <th class="text-end">연장근무2.5</th>
+                  <th class="text-end"></th>
+                  <th>적요</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for day in selected_calc.result.day_results %}
+                  {% if day.bucket_15_min > 0 or day.bucket_20_min > 0 or day.bucket_25_min > 0 %}
+                    <tr>
+                      <td>
+                        {{ day.date }}{% if day.weekday %} ({{ day.weekday }}){% endif %}
+                      </td>
+                      <td class="text-end {% if day.bucket_15_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_15_min/60) }}</td>
+                      <td class="text-end {% if day.bucket_20_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_20_min/60) }}</td>
+                      <td class="text-end {% if day.bucket_25_min > 0 %}text-danger{% endif %}">{{ "%.1f"|format(day.bucket_25_min/60) }}</td>
+                      <td class="text-end"></td>
+                      <td>
+                        {% set display_segments = day.display_segments if day.get('display_segments') else day.segments %}
+                        {% if display_segments %}
+                          {% for seg in display_segments %}
+                            {{ seg.start }}~{{ seg.end }}{% if not loop.last %}, {% endif %}
+                          {% endfor %}
+                        {% else %}
+                          -
+                        {% endif %}
+                        {% if day.memo %}
+                          / {{ day.memo }}
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}
+      <hr class="my-4">
+      <h6 class="mb-3">근무 일시 / 타임라인</h6>
+      {% for day in selected_calc.result.day_results %}
+        <div class="mb-3">
+          {% if day.is_off %}
+            <div class="text-muted">
+              <strong>{{ day.weekday or '' }}요일</strong>
+              {% if day.is_holiday %}
+                <span class="holiday-mark">(휴일)</span>
+              {% endif %}
+              {% if day.date %} ({{ day.date }}){% endif %} - 근무 안함
+            </div>
+          {% else %}
+            <div class="mb-2">
+              <strong>{{ day.weekday or '' }}요일</strong>
+              {% if day.is_holiday %}
+                <span class="holiday-mark">(휴일)</span>
+              {% endif %}
+              {% if day.date %} ({{ day.date }}){% endif %}
+              {% if day.get('segments') %}
+                <div class="small text-muted mt-1">
+                  <strong>근무 시간:</strong>
+                  {% for seg in day.segments %}
+                    {{ seg.start }}~{{ seg.end }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+              {% if day.get('break_times') and day.break_times|length > 0 %}
+                <div class="small text-muted mt-1">
+                  <strong>휴게 시간:</strong>
+                  {% for break_time in day.break_times %}
+                    {{ break_time|replace('[휴일] ', '') }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+              {% if selected_calc.carryover_dates_iso and day.date in selected_calc.carryover_dates_iso %}
+                {% set md = day.date[5:7] ~ "/" ~ day.date[8:10] %}
+                <div class="small text-danger mt-1">
+                  ※ {{ md }}({{ day.weekday or '' }}) 자정 이후 {{ "%.1f"|format(selected_calc.carryover_min/60) }}h는 다음 주로 자동 이월됩니다.
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="timeline-wrap">
+              <div class="timeline-axis mono">
+                {% set max_hours = day.get('max_timeline_hours', 24) %}
+                {% set intervals = (max_hours // 6) + (1 if max_hours % 6 > 0 else 0) %}
+                {% for hour in range(0, max_hours + 1, 6) %}
+                  <span>{{ "%02d"|format(hour) }}</span>
+                {% endfor %}
+              </div>
+              <div class="timeline-row {% if max_hours > 24 %}timeline-row-extended{% endif %}"
+                   style="--timeline-intervals: {{ intervals }};"
+                   aria-label="timeline {{ day.date }}">
+                {% for seg in day.timeline %}
+                  {% set kind_text = {
+                    'm15':'1.5배',
+                    'm20':'2.0배',
+                    'm25':'2.5배',
+                    'break':'휴게',
+                    'base':''
+                  } %}
+                  <div class="seg {{ seg.kind }} timeline-segment"
+                       style="left: {{ seg.left }}%; width: {{ seg.width }}%;"
+                       {% if seg.get('calculation') and seg.kind != 'break' %}
+                       data-bs-toggle="tooltip"
+                       data-bs-placement="top"
+                       data-bs-html="true"
+                       data-bs-title="<div style='text-align: left;'><strong>{{ seg.label }}</strong><br>{{ seg.calculation.replace('\n', '<br>') }}</div>"
+                       {% else %}
+                       title="{{ seg.label }}"
+                       {% endif %}>
+                    {% if seg.kind in ['m15','m20','m25','break'] and seg.width >= 2.5 %}
+                      <span class="seg-label">{{ kind_text.get(seg.kind, '') }}</span>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% if day.get('has_admin_interpretation') %}
+              <div class="small text-muted mt-1">
+                ※ 자정을 넘어 이어진 근로는 다음날 시업시각 이전까지만 전일 근로로 계산됩니다.
+                <br>이후에는 전일 연장수당이 적용되지 않습니다.
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+      new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+  });
+</script>
+{% endblock %}
+
+{% endblock %}

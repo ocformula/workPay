@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">관리자 보관함</h3>
+    <div class="small-muted">삭제된 주간 계산 내역</div>
+  </div>
+  <div>
+    <form method="post" action="{{ url_for('admin_logout') }}" style="display:inline;">
+      <button type="submit" class="btn btn-outline-danger">로그아웃</button>
+    </form>
+    <a class="btn btn-outline-primary" href="{{ url_for('admin_employees') }}">직원 관리</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('employees') }}">직원별 기록</a>
+  </div>
+</div>
+
+{% if employee_names and employee_names|length > 0 %}
+  <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-3">
+    <select class="form-select form-select-sm" style="width: 160px;"
+            onchange="if(this.value){window.location=this.value;}">
+      <option value="{{ url_for('admin_trash', year=selected_year, ym=selected_ym) }}"
+              {% if not selected_employee %}selected{% endif %}>직원 전체</option>
+      {% for name in employee_names %}
+        <option value="{{ url_for('admin_trash', year=selected_year, ym=selected_ym, employee=name) }}"
+                {% if selected_employee == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+{% endif %}
+
+{% if year_month_groups and year_month_groups|length > 0 %}
+  <div class="mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <select class="form-select form-select-sm" style="width: 120px;"
+              onchange="if(this.value){window.location=this.value;}">
+        <option value="{{ url_for('admin_trash', employee=selected_employee) }}"
+                {% if not selected_year %}selected{% endif %}>전체</option>
+        {% for year in year_month_groups.keys()|sort(reverse=true) %}
+          <option value="{{ url_for('admin_trash', year=year, employee=selected_employee) }}"
+                  {% if selected_year == year %}selected{% endif %}>{{ year }}</option>
+        {% endfor %}
+      </select>
+      {% if selected_year %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('admin_trash', employee=selected_employee) }}">전체 보기</a>
+      {% endif %}
+    </div>
+    {% if selected_year and year_month_groups.get(selected_year) %}
+      <ul class="nav nav-pills">
+        <li class="nav-item">
+          <a class="nav-link {% if not selected_ym %}active{% endif %}"
+             href="{{ url_for('admin_trash', year=selected_year, employee=selected_employee) }}">전체</a>
+        </li>
+        {% for month in year_month_groups[selected_year] %}
+          {% set ym = selected_year ~ '-' ~ month %}
+          <li class="nav-item">
+            <a class="nav-link {% if selected_ym == ym %}active{% endif %}"
+               href="{{ url_for('admin_trash', year=selected_year, ym=ym, employee=selected_employee) }}">{{ month }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+    {% if items and items|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>직원</th>
+              <th>근로기간</th>
+              <th class="text-end">실근로</th>
+              <th class="text-end">1.5배</th>
+              <th class="text-end">2.0배</th>
+              <th class="text-end">2.5배</th>
+              <th>삭제일</th>
+              <th class="text-end">작업</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr>
+                <td>{{ item.employee_name }}</td>
+                <td>
+                  {{ item.week_start_date }} ~ {{ item.week_end_date }}
+                  <div class="small-muted">기준 {{ item.normal_start }}~{{ item.normal_end }}</div>
+                </td>
+                <td class="text-end mono">{{ "%.1f"|format(item.week_total_min/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_15_total/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_20_total/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_25_total/60) }}</td>
+                <td>{{ item.deleted_at }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary"
+                     href="{{ url_for('admin_trash_detail', trash_id=item.id) }}">
+                    상세
+                  </a>
+                  <form method="post"
+                        action="{{ url_for('admin_trash_restore', trash_id=item.id) }}"
+                        onsubmit="return confirm('해당 내역을 복원할까요?');"
+                        style="display: inline;">
+                    <button type="submit" class="btn btn-sm btn-outline-success">복원</button>
+                  </form>
+                  <form method="post"
+                        action="{{ url_for('admin_trash_purge', trash_id=item.id) }}"
+                        onsubmit="return confirm('영구 삭제하면 복구할 수 없습니다. 진행할까요?');"
+                        style="display: inline;">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">영구삭제</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">보관함에 내역이 없습니다.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,29 @@
+[Unit]
+Description=WorkPay Calculator Flask Application
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Group=YOUR_GROUP
+WorkingDirectory=/path/to/workpay_calculator_only/workpay_calculator_only
+Environment="PATH=/path/to/workpay_calculator_only/venv/bin"
+ExecStart=/path/to/workpay_calculator_only/venv/bin/python -m flask run --host=0.0.0.0 --port=8888
+# 또는 가상환경을 사용하지 않는 경우:
+# ExecStart=/usr/bin/python3 -m flask run --host=0.0.0.0 --port=8888
+
+# 자동 재시작 설정
+Restart=always
+RestartSec=10
+
+# 로그 설정
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=workpay-calculator
+
+# 보안 설정 (선택사항)
+# NoNewPrivileges=true
+# PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

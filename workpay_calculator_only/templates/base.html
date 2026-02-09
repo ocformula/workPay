@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or "WorkPay" }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+    .small-muted { font-size: .9rem; color: #6c757d; }
+    .badge-soft { background: #f1f3f5; color: #343a40; }
+    .holiday-mark { color: #dc3545; font-weight: 700; margin-left: 4px; }
+
+    /* Timeline */
+    .timeline-wrap { margin-top: .25rem; }
+    .timeline-row { position: relative; height: 22px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 10px; overflow: hidden; }
+    .seg { position: absolute; top: 0; height: 100%; }
+    .seg.base { background: #adb5bd; }
+    .seg.m15  { background: #0d6efd; }
+    .seg.m20  { background: #198754; }
+    .seg.m25  { background: #7c3aed; }
+    .text-purple { color: #7c3aed; }
+    .seg.break{ background: #ffc107; }
+    .legend-dot { display:inline-block; width:10px; height:10px; border-radius: 3px; margin-right:6px; vertical-align: -1px; }
+
+    /* Weekly table column splits - softer but clear divider */
+    table.work-table th.split-right,
+    table.work-table td.split-right {
+      border-right: 2px solid rgba(0, 0, 0, 0.08) !important;
+    }
+    table.work-table th.split-left,
+    table.work-table td.split-left {
+      border-left: 2px solid rgba(0, 0, 0, 0.08) !important;
+    }
+
+    /* Grouped header styling for 근무 시간 / ERP 집계 결과 */
+    table.work-table .work-group-header {
+      background: #f8f9fa;
+      border-bottom: 1px solid #dee2e6;
+    }
+    table.work-table .erp-group-header {
+      background: #f3f5ff;
+      border-bottom: 1px solid #c5c9f5;
+    }
+    table.work-table thead tr:nth-child(2) th {
+      border-top: 0;
+    }
+
+    /* ERP 쪽 컬럼에 옅은 배경으로 시각적 그룹화 */
+    table.work-table td.erp-cell,
+    table.work-table th.erp-header-cell {
+      background-color: #f8f9ff;
+    }
+
+    /* 가독성을 위한 줄무늬 */
+    table.work-table tbody tr:nth-child(even) {
+      background-color: #fcfcfd;
+    }
+
+/* (week.html) 근무 일시 시간 크게 */
+.entry-time .time-big{
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+/* 시간축 */
+.timeline-axis{
+  display:flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 0 6px;
+  margin: 6px 0 4px;
+  color: #6c757d;
+}
+
+/* 타임라인 높이/가독성 */
+.timeline-row{
+  position: relative;
+  height: 30px;            /* 기존 22px보다 높여서 텍스트가 잘 보이게 */
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* 6시간 간격의 세로 가이드라인(약하게) - 동적으로 계산 */
+.timeline-row::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: repeating-linear-gradient(
+    to right,
+    rgba(255,255,255,0.35) 0,
+    rgba(255,255,255,0.35) 1px,
+    transparent 1px,
+    transparent calc(100% / var(--timeline-intervals, 4))
+  );
+  pointer-events:none;
+  z-index: 1;
+  --timeline-intervals: 4; /* 기본 24시간 = 4개 구간 (6시간씩) */
+}
+
+/* 세그먼트에 텍스트를 중앙 정렬로 넣기 */
+/* 타임라인에서만 세그먼트가 absolute로 동작하도록 스코프 제한 */
+.timeline-row .seg{
+  position:absolute;
+  top:0;
+  height:100%;
+  z-index: 2;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.35);
+  white-space: nowrap;
+}
+
+
+
+/* 기본/휴게는 글자색 가독성 조정 */
+.timeline-row .seg.base{
+  opacity: 0.35;
+  color: #212529;
+  text-shadow: none;
+  font-weight: 700;
+}
+.timeline-row .seg.break{
+  color: #212529;
+  text-shadow: none;
+  font-weight: 800;
+}
+
+/* 라벨이 넘치면 ... 처리 */
+.seg-label{
+  pointer-events:none;
+  overflow:hidden;
+  text-overflow: ellipsis;
+}
+
+/* 범례에서는 seg를 "칩"처럼 보이게 */
+.legend .seg{
+  position: static;      /* absolute 금지 */
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+.legend .legend-item{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  margin-bottom: 6px;
+}
+
+
+  </style>
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container">
+    <a class="navbar-brand" href="{{ url_for('employees') }}">WorkPay 주간 계산기</a>
+    <div class="navbar-nav ms-auto">
+      <a class="nav-link" href="{{ url_for('admin_employees') }}">관리자</a>
+      <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#referenceModal">적용 기준</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container my-4">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat, msg in messages %}
+        <div class="alert alert-{{ cat }} mb-2">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+
+  <hr class="my-4">
+  <div class="small-muted">
+  </div>
+</div>
+
+<!-- 참조사항 모달 -->
+<div class="modal fade" id="referenceModal" tabindex="-1" aria-labelledby="referenceModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="referenceModalLabel">📚 적용 기준</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <h6 class="fw-bold mb-3">가산수당 계산 기준</h6>
+        <div class="table-responsive mb-4">
+          <table class="table table-bordered table-sm">
+            <thead class="table-light">
+              <tr>
+                <th>구분</th>
+                <th class="text-center">가산률</th>
+                <th>비고</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>연장근로</td>
+                <td class="text-center">50%</td>
+                <td>일일 8시간 초과 또는 주 40시간 초과 시</td>
+              </tr>
+              <tr>
+                <td>야간근로</td>
+                <td class="text-center">50%</td>
+                <td>22:00~06:00</td>
+              </tr>
+              <tr>
+                <td>휴일근로</td>
+                <td class="text-center">50%</td>
+                <td>공휴일 근로</td>
+              </tr>
+            </tbody>
+          </table>
+          <li class="mb-2">• 휴일은 빨간날(공휴일)만 해당하며, 토요일은 휴일이 아닙니다.</li>
+        </div>
+
+        <h6 class="fw-bold mb-3">가산수당 중복 적용 기준</h6>
+        <div class="table-responsive mb-4">
+          <table class="table table-bordered table-sm">
+            <thead class="table-light">
+              <tr>
+                <th>조건</th>
+                <th class="text-center">가산률</th>
+                <th>계산식</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>연장/야간/휴일 중 1가지</td>
+                <td class="text-center">1.5배</td>
+                <td>1.0 + 0.5</td>
+              </tr>
+              <tr>
+                <td>연장+야간 또는 야간+휴일 또는 휴일+연장</td>
+                <td class="text-center">2.0배</td>
+                <td>1.0 + 0.5 + 0.5</td>
+              </tr>
+              <tr>
+                <td>휴일+연장+야간</td>
+                <td class="text-center">2.5배</td>
+                <td>1.0 + 0.5 + 0.5 + 0.5</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h6 class="fw-bold mb-3">연장근로 판단 기준</h6>
+        <ul class="list-unstyled mb-4">
+          <li class="mb-2">• <strong>하루 기준(00:00~24:00):</strong> 실근로가 8시간을 넘는 부분은 연장으로 봅니다.</li>
+          <li class="mb-2">• <strong>주간 기준:</strong> 주 40시간을 넘는 부분은 연장으로 봅니다.<br>(일별 연장(8시간 초과)은 별도로 계산되고, 주간 기준에는 포함되지 않습니다.)</li>
+          <li class="mb-2">• <strong>연장근로 한도:</strong> 연장근로 시간은 1주 12시간을 초과할 수 없습니다.</li>
+        </ul>
+
+        <h6 class="fw-bold mb-3">휴게시간 규칙</h6>
+        <ul class="list-unstyled mb-4">
+          <li class="mb-2">• <strong>4시간 초과:</strong> 30분 이상 휴게</li>
+          <li class="mb-2">• <strong>시간대가 나뉜 경우:</strong> 각각의 근무에 대해 휴게를 계산합니다.</li>
+          <li class="mb-2">• <strong>배치 방식:</strong> 4시간 근무 후 30분 휴게를 반복 배치합니다.</li>
+        </ul>
+
+        <h6 class="fw-bold mb-3">행정해석</h6>
+
+        <ul class="list-unstyled mb-4">
+          <li class="mb-2">• <strong>근기68207-402 (2003.3.31)</strong>: 역일을 넘어 계속 근로가 이어지면 전일 근로의 연장으로 보되, 익일 소정근로 시업시각 이후의 근로는 익일의 소정근로로 봅니다.</li>
+          <li class="mb-2">• 주휴일에 시작된 근로가 익일로 이어지는 경우, <strong>익일 시업시각 이전</strong>은 전일(휴일) 근로로 보고 휴일근로수당을 지급합니다.</li>
+          <li class="mb-2">• 익일 시업시각 이후의 근로는 전일 연장으로 보지 않습니다.</li>
+          <li class="mb-2">• <strong>00:00에 새로 시작한 근로</strong>는 전일 연장이 아닙니다.</li>
+          <li class="mb-2">• <strong>주휴일 전일에 근로를 개시하여 역일상 휴일까지 근로를 한 경우</strong>는 하나의 근로로 보고 휴일근로수당 없이 연장·야간수당만 적용합니다.</li>
+          <br>
+          <div class="mb-3">
+            <img src="{{ url_for('static', filename='admin-interpretation.png') }}"
+                 alt="행정해석 참고 이미지"
+                 style="max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 6px;">
+          </div>
+        </ul>
+
+        <h6 class="fw-bold mb-3">관련 법령</h6>
+        <ul class="list-unstyled mb-0">
+          <li class="mb-2">• <strong>근로기준법 제56조</strong> (연장·야간 및 휴일 근로): 연장·야간·휴일근로에 대해 통상임금의 50% 이상 가산, 휴일근로 8시간 초과분은 100% 가산.</li>
+          <li class="mb-2">• <strong>근로기준법 제50조</strong> (근로시간): 1일 8시간, 1주 40시간(휴게 제외).</li>
+          <li class="mb-2">• <strong>근로기준법 제53조</strong> (연장근로 제한): (합의 시) 1주 12시간 한도.</li>
+          <li class="mb-2">• <strong>근로기준법 제57조</strong> (보상휴가제): 근로자대표와 서면합의로 가산수당 대신 휴가로 대체 가능.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

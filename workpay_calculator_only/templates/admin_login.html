@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="mb-3">관리자 인증</h5>
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label">비밀번호</label>
+            <input type="password" class="form-control" name="password" required>
+          </div>
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary">확인</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h3 class="mb-1">주간 근무 가산수당 계산 결과</h3>
+    <div class="small-muted">
+      직원: {{ employee_name }}
+    </div>
+    <div class="small-muted">
+      {{ week_start_date }} ({{ weekdays[0] }}) ~ {{ week_end_date }} ({{ weekdays[6] }})
+    </div>
+    {% if carryover_min and carryover_min > 0 %}
+      <div class="mt-2 small text-danger">
+        {% set carry_dates = carryover_date_labels or [] %}
+        {% if carry_dates|length == 1 %}
+          ※ {{ carry_dates[0] }} 자정 이후 {{ "%.1f"|format(carryover_min/60) }}h는 다음 주로 자동 이월됩니다.
+        {% else %}
+          ※ 자정 이후 {{ "%.1f"|format(carryover_min/60) }}h는 다음 주로 자동 이월됩니다.
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+  <div>
+    <form method="post" action="{{ url_for('calculator_save') }}" style="display: inline;" id="saveForm">
+      <input type="hidden" name="employee_name" value="{{ employee_name }}">
+      <input type="hidden" name="week_start_date" value="{{ week_start_date }}">
+      <input type="hidden" name="week_end_date" value="{{ week_end_date }}">
+      <input type="hidden" name="normal_start" value="{{ normal_start }}">
+      <input type="hidden" name="normal_end" value="{{ normal_end }}">
+      <input type="hidden" name="input_json" value="{{ input_json|e }}">
+      <input type="hidden" name="result_json" value="{{ result_json|e }}">
+      <button type="submit" class="btn btn-primary me-2">내역 저장</button>
+    </form>
+    <form method="post" action="{{ url_for('calculator_export') }}" style="display: inline;" id="exportForm">
+      <input type="hidden" name="employee_name" value="{{ employee_name }}">
+      <input type="hidden" name="week_start_date" value="{{ week_start_date }}">
+      <input type="hidden" name="week_end_date" value="{{ week_end_date }}">
+      <input type="hidden" name="week_total_min" value="{{ week_total_min }}">
+      <input type="hidden" name="result_json" value="{{ result_json|e }}">
+      <input type="hidden" name="carryover_dates_iso" value='{{ carryover_dates_iso|tojson|e }}'>
+      <input type="hidden" name="bucket_15_total" value="{{ bucket_15_total }}">
+      <input type="hidden" name="bucket_20_total" value="{{ bucket_20_total }}">
+      <input type="hidden" name="bucket_25_total" value="{{ bucket_25_total }}">
+      {% for day_result in day_results %}
+        {% set day_idx = loop.index0 %}
+        <input type="hidden" name="day_date_{{ day_idx }}" value="{{ day_result.date }}">
+        <input type="hidden" name="day_off_{{ day_idx }}" value="{{ 'true' if day_result.is_off else 'false' }}">
+        <input type="hidden" name="day_work_min_{{ day_idx }}" value="{{ day_result.work_min }}">
+        <input type="hidden" name="day_break_min_{{ day_idx }}" value="{{ day_result.break_min }}">
+        <input type="hidden" name="day_bucket_15_{{ day_idx }}" value="{{ day_result.bucket_15_min }}">
+        <input type="hidden" name="day_bucket_20_{{ day_idx }}" value="{{ day_result.bucket_20_min }}">
+        <input type="hidden" name="day_bucket_25_{{ day_idx }}" value="{{ day_result.bucket_25_min }}">
+        <input type="hidden" name="day_memo_{{ day_idx }}" value="{{ day_result.get('memo', '') }}">
+        <input type="hidden" name="day_work_times_{{ day_idx }}" value="{{ day_result.get('work_times_str', '') }}">
+      {% endfor %}
+      <button type="submit" class="btn btn-success me-2">📥 엑셀 다운로드</button>
+    </form>
+    <form method="post" action="{{ url_for('calculator_reload') }}" style="display: inline;">
+      <input type="hidden" name="employee_name" value="{{ employee_name }}">
+      <input type="hidden" name="input_json" value="{{ input_json|e }}">
+      <button type="submit" class="btn btn-outline-secondary">다시 계산</button>
+    </form>
+  </div>
+</div>
+
+<!-- 가산 수당 산정 기준 안내 -->
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="small-muted mb-2">💡 가산 수당 산정 기준 안내</div>
+    <div class="row text-center g-0 border rounded overflow-hidden">
+      <div class="col-md-4 p-3 border-end">
+        <div class="fw-bold text-primary mb-1">1.5배 구역</div>
+        <div class="small-muted">연장 / 야간 / 휴일<br>1가지 해당 시</div>
+      </div>
+      <div class="col-md-4 p-3 border-end">
+        <div class="fw-bold text-success mb-1">2.0배 구역</div>
+        <div class="small-muted">연장+야간 / 야간+휴일 / 휴일+연장<br>2가지 중복 시</div>
+      </div>
+      <div class="col-md-4 p-3">
+        <div class="fw-bold text-purple mb-1">2.5배 구역</div>
+        <div class="small-muted">휴일 + 연장 + 야간<br>3가지 모두 중복 시</div>
+      </div>
+    </div>
+    <div class="legend mt-3">
+      <div class="legend-item"><span class="seg base"></span><span>기본(1.0)</span></div>
+      <div class="legend-item"><span class="seg m15"></span><span>1.5배</span></div>
+      <div class="legend-item"><span class="seg m20"></span><span>2.0배</span></div>
+      <div class="legend-item"><span class="seg m25"></span><span>2.5배</span></div>
+      <div class="legend-item"><span class="seg break"></span><span>휴게</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- 주간 실근로 -->
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+      <h5 class="card-title mb-0">주간 집계 요약</h5>
+      {% if week_total_min > 52 * 60 %}
+        <span class="text-danger fw-bold">[주 52시간 초과! 담당자 확인 필요]</span>
+      {% endif %}
+      {% if week_overtime_min and week_overtime_min > 12 * 60 %}
+        <span class="text-danger fw-bold">[연장근로 12시간 초과! 담당자 확인 필요]</span>
+      {% endif %}
+    </div>
+    {% set base_total_min = week_total_min - bucket_15_total - bucket_20_total - bucket_25_total %}
+    <div class="row">
+      <div class="col-md-2">
+        <div class="text-muted small">총 실근로(휴게 제외)</div>
+        <div class="h4 mono {% if week_total_min > 52 * 60 %}text-danger fw-bold{% endif %}">{{ "%.1f"|format(week_total_min/60) }}h</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">1.0배 시간</div>
+        <div class="h4 mono text-secondary">{{ "%.1f"|format(base_total_min/60) }}h</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">1.5배 시간</div>
+        <div class="h4 mono text-primary">{{ "%.1f"|format(bucket_15_total/60) }}h</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">2.0배 시간</div>
+        <div class="h4 mono text-success">{{ "%.1f"|format(bucket_20_total/60) }}h</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">2.5배 시간</div>
+        <div class="h4 mono text-purple">{{ "%.1f"|format(bucket_25_total/60) }}h</div>
+      </div>
+    </div>
+    <div class="mt-2 small text-muted">
+      연장근로가 포함된 시간: <strong class="{% if week_overtime_min and week_overtime_min > 12 * 60 %}text-danger{% endif %}">{{ "%.1f"|format((week_overtime_min or 0)/60) }}h</strong>
+      · 총 실근로는 52시간, 연장근로가 포함된 시간은 12시간을 초과하면 안 됩니다.
+    </div>
+  </div>
+</div>
+
+<!-- 일별 상세 결과 -->
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle work-table">
+        <thead class="table-light">
+          <tr>
+            <th class="text-center align-middle" rowspan="2" style="min-width: 420px;">근무 일시 / 타임라인</th>
+            <th class="text-center work-group-header" colspan="3">근무 시간(h)</th>
+            <th class="text-center erp-group-header" colspan="4">ERP 집계 결과(h)</th>
+          </tr>
+          <tr>
+            <th class="text-end">총시간</th>
+            <th class="text-end">휴게</th>
+            <th class="text-end split-right">실근로</th>
+            <th class="text-end split-left erp-header-cell">1.0배</th>
+            <th class="text-end erp-header-cell">1.5배</th>
+            <th class="text-end erp-header-cell">2.0배</th>
+            <th class="text-end erp-header-cell">2.5배</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for day_result in day_results %}
+            {% set day_idx = loop.index0 %}
+            <tr>
+              <td>
+                {% if day_result.is_off %}
+                  <div class="text-muted">
+                    <strong>{{ weekdays[day_idx] }}요일</strong>
+                    {% if day_result.is_holiday %}
+                      <span class="holiday-mark">(휴일)</span>
+                    {% endif %}
+                    - 근무 안함
+                  </div>
+                {% else %}
+                  <div class="mb-2">
+                    <strong>{{ weekdays[day_idx] }}요일</strong>
+                    {% if day_result.is_holiday %}
+                      <span class="holiday-mark">(휴일)</span>
+                    {% endif %}
+                    ({{ day_result.date }})
+                    {% if day_result.get('segments') %}
+                      <div class="small text-muted mt-1">
+                        <strong>근무 시간:</strong> 
+                        {% for seg in day_result.segments %}
+                          {{ seg.start }}~{{ seg.end }}{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    {% if day_result.get('break_times') and day_result.break_times|length > 0 %}
+                      <div class="small text-muted mt-1">
+                        <strong>휴게 시간:</strong> 
+                        {% for break_time in day_result.break_times %}
+                          {{ break_time|replace('[휴일] ', '') }}{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    {% if day_result.get('memo') %}
+                      <div class="small text-muted mt-1">
+                        <strong>메모:</strong> {{ day_result.memo }}
+                      </div>
+                    {% endif %}
+                  {% if carryover_dates_iso and day_result.date in carryover_dates_iso %}
+                    {% set md = day_result.date[5:7] ~ "/" ~ day_result.date[8:10] %}
+                    <div class="small text-danger mt-1">
+                      ※ {{ md }}({{ weekdays[day_idx] }}) 자정 이후 {{ "%.1f"|format(carryover_min/60) }}h는 다음 주로 자동 이월됩니다.
+                    </div>
+                  {% endif %}
+                  </div>
+
+                  <!-- 타임라인 -->
+                  <div class="timeline-wrap">
+                    <div class="timeline-axis mono">
+                      {% set max_hours = day_result.get('max_timeline_hours', 24) %}
+                      {% set intervals = (max_hours // 6) + (1 if max_hours % 6 > 0 else 0) %}
+                      {% for hour in range(0, max_hours + 1, 6) %}
+                        <span>{{ "%02d"|format(hour) }}</span>
+                      {% endfor %}
+                    </div>
+                    <div class="timeline-row {% if max_hours > 24 %}timeline-row-extended{% endif %}" 
+                         style="--timeline-intervals: {{ intervals }};" 
+                         aria-label="timeline {{ day_result.date }}">
+                      {% for seg in day_result.timeline %}
+                        {% set kind_text = {
+                          'm15':'1.5배',
+                          'm20':'2.0배',
+                          'm25':'2.5배',
+                          'break':'휴게',
+                          'base':''
+                        } %}
+                        {% set tooltip_text = seg.label %}
+                        {% if seg.get('calculation') and seg.kind != 'break' %}
+                          {% set tooltip_text = seg.label + '\n\n📊 가산수당 계산:\n' + seg.calculation %}
+                        {% elif seg.kind == 'break' %}
+                          {% set tooltip_text = seg.label + '\n\n휴게시간' %}
+                        {% endif %}
+                        <div class="seg {{ seg.kind }} timeline-segment"
+                             style="left: {{ seg.left }}%; width: {{ seg.width }}%;"
+                             {% if seg.get('calculation') and seg.kind != 'break' %}
+                             data-bs-toggle="tooltip"
+                             data-bs-placement="top"
+                             data-bs-html="true"
+                             data-bs-title="<div style='text-align: left;'><strong>{{ seg.label }}</strong><br>{{ seg.calculation.replace('\n', '<br>') }}</div>"
+                             {% else %}
+                             title="{{ seg.label }}"
+                             {% endif %}>
+                          {% if seg.kind in ['m15','m20','m25','break'] and seg.width >= 2.5 %}
+                            <span class="seg-label">{{ kind_text.get(seg.kind, '') }}</span>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  {% if day_result.get('has_admin_interpretation') %}
+                    <div class="small text-muted mt-1">
+                      ※ 자정을 넘어 이어진 근로는 다음날 시업시각 이전까지만 전일 근로로 계산됩니다.
+                      <br>이후에는 전일 연장수당이 적용되지 않습니다.
+                    </div>
+                  {% endif %}
+                {% endif %}
+              </td>
+
+              {% if day_result.is_off %}
+                <td class="text-end mono">-</td>
+                <td class="text-end mono">-</td>
+                <td class="text-end mono split-right">-</td>
+                <td class="text-end mono split-left erp-cell">-</td>
+                <td class="text-end mono erp-cell">-</td>
+                <td class="text-end mono erp-cell">-</td>
+                <td class="text-end mono erp-cell">-</td>
+              {% else %}
+                <td class="text-end mono">{{ "%.1f"|format((day_result.work_min + day_result.break_min)/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(day_result.break_min/60) }}</td>
+                <td class="text-end mono split-right">{{ "%.1f"|format(day_result.work_min/60) }}</td>
+                {% set day_base_min = day_result.work_min - day_result.bucket_15_min - day_result.bucket_20_min - day_result.bucket_25_min %}
+                <td class="text-end mono split-left erp-cell">{{ "%.1f"|format(day_base_min/60) }}</td>
+                <td class="text-end mono erp-cell">{{ "%.1f"|format(day_result.bucket_15_min/60) }}</td>
+                <td class="text-end mono erp-cell">{{ "%.1f"|format(day_result.bucket_20_min/60) }}</td>
+                <td class="text-end mono erp-cell">{{ "%.1f"|format(day_result.bucket_25_min/60) }}</td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Bootstrap 툴팁 초기화
+  document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+  });
+</script>
+{% endblock %}

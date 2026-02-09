@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">직원 관리</h3>
+    <div class="small-muted">직원 추가/삭제</div>
+  </div>
+  <div>
+    <form method="post" action="{{ url_for('admin_logout') }}" style="display:inline;">
+      <button type="submit" class="btn btn-outline-danger">로그아웃</button>
+    </form>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_trash') }}">삭제 보관함</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('employees') }}">직원별 기록</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form class="d-flex flex-wrap gap-2" method="post" action="{{ url_for('admin_employee_add') }}">
+      <input type="text" name="employee_name" class="form-control form-control-sm" placeholder="직원명 추가" required>
+      <button type="submit" class="btn btn-sm btn-primary">직원 추가</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    {% if items and items|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>직원명</th>
+              <th class="text-end">저장된 주간 건수</th>
+              <th class="text-end">보관함 건수</th>
+              <th class="text-end">삭제</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              {% set has_data = (item.calc_count or 0) > 0 or (item.trash_count or 0) > 0 %}
+              <tr>
+                <td>{{ item.name }}</td>
+                <td class="text-end mono">{{ item.calc_count }}</td>
+                <td class="text-end mono">{{ item.trash_count }}</td>
+                <td class="text-end">
+                  <form method="post"
+                        action="{{ url_for('admin_employee_delete', employee_id=item.id) }}"
+                        onsubmit="return confirm('직원을 삭제하면 복구할 수 없습니다. 진행할까요?');"
+                        class="d-inline-flex align-items-center gap-2">
+                    <button type="button"
+                            class="btn btn-sm btn-outline-danger js-delete-toggle"
+                            data-target="delete-box-{{ item.id }}"
+                            {% if has_data %}disabled{% endif %}>
+                      삭제
+                    </button>
+                    <span id="delete-box-{{ item.id }}" class="d-none align-items-center gap-2">
+                      <input type="password" name="password" class="form-control form-control-sm"
+                             placeholder="관리자 비밀번호" required>
+                      <button type="submit" class="btn btn-sm btn-danger">확인 삭제</button>
+                    </span>
+                  </form>
+                  {% if has_data %}
+                    <div class="small text-muted mt-1">계산/보관함 내역이 있으면 삭제 불가</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">등록된 직원이 없습니다.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".js-delete-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-target");
+      if (!targetId) return;
+      const box = document.getElementById(targetId);
+      if (!box) return;
+      box.classList.toggle("d-none");
+      box.classList.toggle("d-inline-flex");
+      const input = box.querySelector("input[type='password']");
+      if (input) input.focus();
+    });
+  });
+</script>
+
+{% endblock %}

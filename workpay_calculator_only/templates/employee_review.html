@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">{{ employee_name }} 수정 필요 항목</h3>
+    <div class="small-muted">저장된 주간 계산 내역 중 기준 초과 항목</div>
+  </div>
+  <div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('employee_detail', employee_name=employee_name) }}">목록으로</a>
+  </div>
+</div>
+
+{% if year_month_groups and year_month_groups|length > 0 %}
+  <div class="mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <select class="form-select form-select-sm" style="width: 120px;"
+              onchange="if(this.value){window.location=this.value;}">
+        <option value="{{ url_for('employee_review', employee_name=employee_name) }}"
+                {% if not selected_year %}selected{% endif %}>전체</option>
+        {% for year in year_month_groups.keys()|sort(reverse=true) %}
+          <option value="{{ url_for('employee_review', employee_name=employee_name, year=year) }}"
+                  {% if selected_year == year %}selected{% endif %}>{{ year }}</option>
+        {% endfor %}
+      </select>
+      {% if selected_year %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('employee_review', employee_name=employee_name) }}">전체 보기</a>
+      {% endif %}
+    </div>
+    {% if selected_year and year_month_groups.get(selected_year) %}
+      <ul class="nav nav-pills">
+        <li class="nav-item">
+          <a class="nav-link {% if not selected_ym %}active{% endif %}"
+             href="{{ url_for('employee_review', employee_name=employee_name, year=selected_year) }}">전체</a>
+        </li>
+        {% for month in year_month_groups[selected_year] %}
+          {% set ym = selected_year ~ '-' ~ month %}
+          <li class="nav-item">
+            <a class="nav-link {% if selected_ym == ym %}active{% endif %}"
+               href="{{ url_for('employee_review', employee_name=employee_name, year=selected_year, ym=ym) }}">{{ month }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="card border-danger">
+  <div class="card-body">
+    {% if review_items and review_items|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>기간</th>
+              <th class="text-end">실근로</th>
+              <th class="text-end">1.5배</th>
+              <th class="text-end">2.0배</th>
+              <th class="text-end">2.5배</th>
+              <th class="text-end">선택</th>
+              <th class="text-end">삭제</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in review_items %}
+              <tr>
+                <td>
+                  {{ item.week_start_date }} ~ {{ item.week_end_date }}
+                  <div class="small-muted">기준 {{ item.normal_start }}~{{ item.normal_end }}</div>
+                  {% if item.auto_carryover %}
+                    <span class="badge text-bg-warning">이월</span>
+                  {% endif %}
+                  <span class="badge text-bg-danger ms-1">수정필요</span>
+                </td>
+                <td class="text-end mono">{{ "%.1f"|format(item.week_total_min/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_15_total/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_20_total/60) }}</td>
+                <td class="text-end mono">{{ "%.1f"|format(item.bucket_25_total/60) }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary"
+                     href="{{ url_for('employee_detail', employee_name=employee_name, calc_id=item.id, review=1, year=selected_year, ym=selected_ym) }}">
+                    상세
+                  </a>
+                </td>
+                <td class="text-end">
+                  <form method="post"
+                        action="{{ url_for('employee_delete', employee_name=employee_name) }}"
+                        onsubmit="return confirm('선택한 계산 내역을 삭제할까요?');"
+                        style="display: inline;">
+                    <input type="hidden" name="calc_id" value="{{ item.id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">수정 필요 항목이 없습니다.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

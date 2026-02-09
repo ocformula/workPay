@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h3 class="mb-2">WorkPay 주간 계산기</h3>
+    <div class="text-muted">
+      주간 근무 시간과 가산수당을 간편하게 계산하고, 직원별 내역을 관리할 수 있습니다.
+      직원 선택 후 근무등록 또는 내역보기를 진행하세요.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h5 class="mb-3">직원 선택</h5>
+    {% if employees and employees|length > 0 %}
+      <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label">직원명</label>
+          <select class="form-select" id="employeeSelect">
+            {% for emp in employees %}
+              <option value="{{ emp.name }}">{{ emp.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-8 d-flex flex-wrap gap-2">
+          <a class="btn btn-success" id="goRegister" href="{{ url_for('calculator_for_employee', employee_name=employees[0].name) }}">근무등록</a>
+          <a class="btn btn-primary" id="goDetail" href="{{ url_for('employee_detail', employee_name=employees[0].name) }}">내역 보기</a>
+        </div>
+      </div>
+      <div class="small text-muted mt-2">
+        저장된 주간 건수는 직원 상세 화면에서 확인할 수 있습니다.
+      </div>
+    {% else %}
+      <div class="text-muted">등록된 직원이 없습니다. 관리자 페이지에서 직원을 추가하세요.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if employees and employees|length > 0 %}
+  <script>
+    const select = document.getElementById("employeeSelect");
+    const goRegister = document.getElementById("goRegister");
+    const goDetail = document.getElementById("goDetail");
+    if (select && goRegister && goDetail) {
+      const registerBase = "{{ url_for('calculator_for_employee', employee_name='__EMP__') }}";
+      const detailBase = "{{ url_for('employee_detail', employee_name='__EMP__') }}";
+      const updateLinks = () => {
+        const name = select.value;
+        goRegister.href = registerBase.replace("__EMP__", name);
+        goDetail.href = detailBase.replace("__EMP__", name);
+      };
+      select.addEventListener("change", updateLinks);
+      updateLinks();
+    }
+  </script>
+{% endif %}
+
+{% endblock %}

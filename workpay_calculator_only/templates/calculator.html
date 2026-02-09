@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card mb-4">
+  <div class="card-header">
+    <h4 class="mb-0">주간 근무 가산수당 계산기</h4>
+  </div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('calculator_result') }}" id="workForm">
+      <input type="hidden" name="employee_name" value="{{ employee_name }}">
+      {% if error_message %}
+        <div class="alert alert-danger mb-3">{{ error_message }}</div>
+      {% endif %}
+      <div class="mb-3">
+        <label class="form-label">직원</label>
+        <div class="form-control-plaintext fw-bold">{{ employee_name }}</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">주차 기준일</label>
+        <div class="input-group">
+          <button class="btn btn-outline-secondary" type="button" onclick="shiftWeek(-7)" aria-label="이전 주">◀</button>
+          <input type="date" class="form-control" name="week_start" id="week_start" value="{{ week_dates[0].isoformat() if week_dates else '' }}" onchange="updateWeekDates()" required>
+          <button class="btn btn-outline-secondary" type="button" onclick="shiftWeek(7)" aria-label="다음 주">▶</button>
+          <button class="btn btn-outline-secondary" type="button" onclick="setThisWeek()">이번 주</button>
+        </div>
+        <small class="form-text text-muted">해당 주의 아무 날짜나 선택하면 자동으로 해당 주의 월요일부터 일요일까지 표시됩니다.</small>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">정상 근무 시간</label>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <select class="form-select" name="normal_start" id="normal_start" required>
+              {% set normal_start_val = normal_start or '09:00' %}
+              <option value="08:00" {% if normal_start_val == '08:00' %}selected{% endif %}>08:00</option>
+              <option value="09:00" {% if normal_start_val == '09:00' %}selected{% endif %}>09:00</option>
+              <option value="10:00" {% if normal_start_val == '10:00' %}selected{% endif %}>10:00</option>
+            </select>
+            <small class="form-text text-muted">시작 시간</small>
+          </div>
+          <div class="col-md-4">
+            <select class="form-select" name="normal_end" id="normal_end" required>
+              {% set normal_end_val = normal_end or '18:00' %}
+              <option value="17:00" {% if normal_end_val == '17:00' %}selected{% endif %}>17:00</option>
+              <option value="18:00" {% if normal_end_val == '18:00' %}selected{% endif %}>18:00</option>
+              <option value="19:00" {% if normal_end_val == '19:00' %}selected{% endif %}>19:00</option>
+            </select>
+            <small class="form-text text-muted">종료 시간</small>
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <button type="button" class="btn btn-outline-primary w-100" onclick="applyNormalWorkTime()">
+              적용
+            </button>
+          </div>
+        </div>
+        <small class="form-text text-muted">"적용" 버튼을 클릭하면 주간 근무 기록의 모든 시간대가 정상 근무 시간으로 변경됩니다.</small>
+      </div>
+
+      <hr>
+
+      <h5 class="mb-3">주간 근무 기록</h5>
+      <div class="alert alert-info mb-3">
+        <strong>💡 입력 방법 안내:</strong><br>
+        • <strong>날짜 경계를 넘는 근무:</strong> 당일 근무가 다음날까지 연장되는 경우, <span class="text-danger fw-bold">다음날에 별도로 작성하지 마시고 해당 날짜에 시간대를 추가하여 다음날 시간대로 선택하세요.</span><br>
+        &nbsp;&nbsp;예) 12/31 22:00~1/1 09:00 근무 → 12/31에 시간대 추가: 시작 22:00, 종료 09:00<br>
+        • <strong>"휴일" 체크:</strong> 해당 날짜가  휴일인 경우에만 체크하세요. <span class="text-danger fw-bold">토요일은 휴일이 아닙니다. 빨간날(공휴일)만 휴일입니다.</span><br>
+        • <strong>"근무안함" 체크:</strong> 해당 날짜에 근무를 하지 않는 경우 체크하세요.
+      </div>
+      {% set weekdays = ['월', '화', '수', '목', '금', '토', '일'] %}
+      
+      <div class="week-grid">
+      {% for i in range(7) %}
+        {% set day_idx = i %}
+        {% set day_name = weekdays[i] %}
+        {% set day_date = week_dates[i] if week_dates and i < week_dates|length else None %}
+        <div class="day-card">
+          <div class="card h-100 day-work-card compact-card" data-day="{{ day_idx }}">
+            <div class="card-body">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <div>
+                  <h6 class="mb-0">
+                    <strong>{{ day_name }}요일</strong>
+                    <span class="text-muted day-date-{{ day_idx }}" style="font-size: 0.85em; font-weight: normal;">
+                      {% if day_date %}
+                        ({{ day_date.strftime('%m/%d') }})
+                      {% endif %}
+                    </span>
+                  </h6>
+                </div>
+                <div class="d-flex flex-column gap-2">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="day_off_{{ day_idx }}" id="day_off_{{ day_idx }}" 
+                           onchange="toggleDayWork({{ day_idx }})"
+                           {% if day_idx >= 5 %}checked{% endif %}>
+                    <label class="form-check-label small" for="day_off_{{ day_idx }}" title="근무 안함">
+                      근무안함
+                    </label>
+                  </div>
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="day_holiday_{{ day_idx }}" id="day_holiday_{{ day_idx }}"
+                           {% if day_idx == 6 %}checked{% endif %}>
+                    <label class="form-check-label small" for="day_holiday_{{ day_idx }}" title="해당 날짜 전체가 휴일인 경우 체크">
+                      휴일
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="day-work-segments" id="segments_{{ day_idx }}">
+                <div class="segment-item mb-2" data-segment="0">
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <label class="form-label small mb-1">시작</label>
+                      <select class="form-select form-select-sm" name="day_{{ day_idx }}_start_0" required>
+                        {% for hour in range(0, 24) %}
+                          {% set time1 = '%02d:00'|format(hour) %}
+                          {% set time2 = '%02d:30'|format(hour) %}
+                          <option value="{{ time1 }}" {% if hour == 9 %}selected{% endif %}>{{ time1 }}</option>
+                          <option value="{{ time2 }}">{{ time2 }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label small mb-1">종료</label>
+                      <select class="form-select form-select-sm" name="day_{{ day_idx }}_end_0" required>
+                        {% for hour in range(0, 24) %}
+                          {% set time1 = '%02d:00'|format(hour) %}
+                          {% set time2 = '%02d:30'|format(hour) %}
+                          <option value="{{ time1 }}" {% if hour == 18 %}selected{% endif %}>{{ time1 }}</option>
+                          <option value="{{ time2 }}">{{ time2 }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-12">
+                      <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="removeSegment({{ day_idx }}, 0)" style="display:none;">
+                        삭제
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="button" class="btn btn-sm btn-outline-primary w-100 mb-2" id="add_segment_{{ day_idx }}" onclick="addSegment({{ day_idx }})">
+                + 시간대 추가
+              </button>
+              
+              <div class="mt-2">
+                <label class="form-label small mb-1">메모</label>
+                <textarea class="form-control form-control-sm" id="memo_{{ day_idx }}" name="day_memo_{{ day_idx }}" rows="2" placeholder="작업 내용"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+
+      <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+        <button type="submit" class="btn btn-primary btn-lg">계산하기</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+let segmentCounts = {};
+for (let i = 0; i < 7; i++) {
+  segmentCounts[i] = 1;
+}
+
+// 주차 기준일 변경 시 해당 주의 날짜 업데이트
+function updateWeekDates() {
+  const weekStartInput = document.getElementById('week_start');
+  const selectedDate = weekStartInput.value;
+  
+  if (!selectedDate) {
+    return;
+  }
+  
+  const date = new Date(selectedDate + 'T00:00:00');
+  const dayOfWeek = date.getDay(); // 0=일요일, 1=월요일, ..., 6=토요일
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // 월요일로 조정
+  const monday = new Date(date);
+  monday.setDate(date.getDate() + mondayOffset);
+  
+  const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+  
+  for (let i = 0; i < 7; i++) {
+    const currentDate = new Date(monday);
+    currentDate.setDate(monday.getDate() + i);
+    
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+    const day = String(currentDate.getDate()).padStart(2, '0');
+    const displayDate = `${month}/${day}`;
+    
+    // 모든 day-date-{i} 클래스를 가진 요소 찾기 (여러 개일 수 있음)
+    const dateSpans = document.querySelectorAll(`.day-date-${i}`);
+    dateSpans.forEach(dateSpan => {
+      dateSpan.textContent = `(${displayDate})`;
+    });
+  }
+}
+
+function setThisWeek() {
+  const weekStartInput = document.getElementById('week_start');
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  weekStartInput.value = `${yyyy}-${mm}-${dd}`;
+  updateWeekDates();
+}
+
+function shiftWeek(deltaDays) {
+  const weekStartInput = document.getElementById('week_start');
+  const currentValue = weekStartInput.value;
+  const baseDate = currentValue ? new Date(currentValue + 'T00:00:00') : new Date();
+  baseDate.setDate(baseDate.getDate() + deltaDays);
+  const yyyy = baseDate.getFullYear();
+  const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(baseDate.getDate()).padStart(2, '0');
+  weekStartInput.value = `${yyyy}-${mm}-${dd}`;
+  updateWeekDates();
+}
+
+function toggleDayWork(dayIdx) {
+  const checkbox = document.getElementById(`day_off_${dayIdx}`);
+  const segmentsDiv = document.getElementById(`segments_${dayIdx}`);
+  const card = document.querySelector(`.day-work-card[data-day="${dayIdx}"]`);
+  const addButton = document.getElementById(`add_segment_${dayIdx}`);
+  const memo = document.getElementById(`memo_${dayIdx}`);
+  
+  if (checkbox && segmentsDiv && card) {
+    if (checkbox.checked) {
+      segmentsDiv.style.display = 'none';
+      card.classList.add('opacity-50');
+      if (addButton) addButton.disabled = true;
+      if (memo) memo.disabled = true;
+    } else {
+      segmentsDiv.style.display = 'block';
+      card.classList.remove('opacity-50');
+      if (addButton) addButton.disabled = false;
+      if (memo) memo.disabled = false;
+    }
+  }
+}
+
+function buildTimeOptions(selectedValue) {
+  let timeOptions = '';
+  for (let hour = 0; hour < 24; hour++) {
+    for (let minute of [0, 30]) {
+      const timeValue = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      const selected = (timeValue === selectedValue) ? 'selected' : '';
+      timeOptions += `<option value="${timeValue}" ${selected}>${timeValue}</option>`;
+    }
+  }
+  return timeOptions;
+}
+
+function createSegmentElement(dayIdx, segmentIdx, startVal, endVal, canRemove) {
+  const newSegment = document.createElement('div');
+  newSegment.className = 'segment-item mb-2';
+  newSegment.setAttribute('data-segment', segmentIdx);
+  const startOptions = buildTimeOptions(startVal || '09:00');
+  const endOptions = buildTimeOptions(endVal || '18:00');
+  const removeStyle = canRemove ? '' : 'style="display:none;"';
+  
+  newSegment.innerHTML = `
+    <div class="row g-2">
+      <div class="col-6">
+        <label class="form-label small mb-1">시작</label>
+        <select class="form-select form-select-sm" name="day_${dayIdx}_start_${segmentIdx}" required>
+          ${startOptions}
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label small mb-1">종료</label>
+        <select class="form-select form-select-sm" name="day_${dayIdx}_end_${segmentIdx}" required>
+          ${endOptions}
+        </select>
+      </div>
+      <div class="col-12">
+        <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="removeSegment(${dayIdx}, ${segmentIdx})" ${removeStyle}>
+          삭제
+        </button>
+      </div>
+    </div>
+  `;
+  return newSegment;
+}
+
+function addSegment(dayIdx) {
+  const segmentsDiv = document.getElementById(`segments_${dayIdx}`);
+  const count = segmentCounts[dayIdx];
+  segmentCounts[dayIdx] = count + 1;
+  const newSegment = createSegmentElement(dayIdx, count, '22:00', '06:00', true);
+  segmentsDiv.appendChild(newSegment);
+}
+
+function removeSegment(dayIdx, segmentIdx) {
+  const segment = document.querySelector(`#segments_${dayIdx} .segment-item[data-segment="${segmentIdx}"]`);
+  if (segment) {
+    segment.remove();
+  }
+}
+
+// 정상 근무 시간을 모든 세그먼트에 적용
+function applyNormalWorkTime() {
+  const normalStart = document.getElementById('normal_start').value;
+  const normalEnd = document.getElementById('normal_end').value;
+  
+  if (!normalStart || !normalEnd) {
+    alert('정상 근무 시간을 선택해주세요.');
+    return;
+  }
+  
+  // 확인 메시지
+  if (!confirm(`모든 날짜의 근무 시간을 ${normalStart}~${normalEnd}로 변경하시겠습니까?`)) {
+    return;
+  }
+  
+  // 모든 날짜의 모든 세그먼트에 적용
+  for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+    // 근무 안함 체크박스가 체크되어 있으면 건너뛰기
+    const dayOffCheckbox = document.getElementById(`day_off_${dayIdx}`);
+    if (dayOffCheckbox && dayOffCheckbox.checked) {
+      continue;
+    }
+    
+    // 해당 날짜의 모든 세그먼트 찾기
+    const segmentsDiv = document.getElementById(`segments_${dayIdx}`);
+    if (!segmentsDiv) {
+      continue;
+    }
+    
+    // 모든 세그먼트의 시작/종료 시간 변경
+    // name 속성이 "day_${dayIdx}_start_*" 또는 "day_${dayIdx}_end_*" 패턴인 모든 select 찾기
+    const startSelects = segmentsDiv.querySelectorAll(`select[name^="day_${dayIdx}_start_"]`);
+    const endSelects = segmentsDiv.querySelectorAll(`select[name^="day_${dayIdx}_end_"]`);
+    
+    startSelects.forEach(select => {
+      select.value = normalStart;
+    });
+    
+    endSelects.forEach(select => {
+      select.value = normalEnd;
+    });
+  }
+  
+  alert('정상 근무 시간이 적용되었습니다.');
+}
+
+function syncNormalWorkTime(source) {
+  const startSelect = document.getElementById('normal_start');
+  const endSelect = document.getElementById('normal_end');
+  if (!startSelect || !endSelect) return;
+  const mapStartToEnd = {
+    '08:00': '17:00',
+    '09:00': '18:00',
+    '10:00': '19:00',
+  };
+  const mapEndToStart = {
+    '17:00': '08:00',
+    '18:00': '09:00',
+    '19:00': '10:00',
+  };
+  if (source === 'end') {
+    startSelect.value = mapEndToStart[endSelect.value] || '09:00';
+    endSelect.value = mapStartToEnd[startSelect.value] || '18:00';
+    return;
+  }
+  endSelect.value = mapStartToEnd[startSelect.value] || '18:00';
+}
+
+function initNormalWorkTimeSync() {
+  const startSelect = document.getElementById('normal_start');
+  const endSelect = document.getElementById('normal_end');
+  if (!startSelect || !endSelect) return;
+  startSelect.addEventListener('change', () => syncNormalWorkTime('start'));
+  endSelect.addEventListener('change', () => syncNormalWorkTime('end'));
+  syncNormalWorkTime('start');
+}
+
+// 초기화: 첫 번째 세그먼트의 삭제 버튼 숨기기 및 날짜 업데이트
+document.addEventListener('DOMContentLoaded', function() {
+  // 주차 기준일이 이미 설정되어 있으면 날짜 업데이트
+  const weekStartInput = document.getElementById('week_start');
+  if (weekStartInput && weekStartInput.value) {
+    updateWeekDates();
+  }
+  
+  // 근무안함 체크박스가 체크되어 있으면 UI 업데이트
+  for (let i = 0; i < 7; i++) {
+    const checkbox = document.getElementById(`day_off_${i}`);
+    if (checkbox && checkbox.checked) {
+      toggleDayWork(i);
+    }
+  }
+});
+  // 계산 결과에서 재불러오기 프리필
+  const prefillData = {{ prefill_data|tojson|safe if prefill_data else 'null' }};
+  if (prefillData) {
+    const weekStartInput = document.getElementById('week_start');
+    if (prefillData.week_start_date && weekStartInput) {
+      weekStartInput.value = prefillData.week_start_date;
+      updateWeekDates();
+    }
+    if (prefillData.normal_start) {
+      const ns = document.getElementById('normal_start');
+      if (ns) ns.value = prefillData.normal_start;
+    }
+    if (prefillData.normal_end) {
+      const ne = document.getElementById('normal_end');
+      if (ne) ne.value = prefillData.normal_end;
+    }
+
+    const dayMap = {};
+    (prefillData.days || []).forEach(d => {
+      if (d.date) dayMap[d.date] = d;
+    });
+
+    const weekStart = prefillData.week_start_date;
+    const weekStartDate = weekStart ? new Date(weekStart + 'T00:00:00') : null;
+
+    for (let i = 0; i < 7; i++) {
+      if (!weekStartDate) continue;
+      const currentDate = new Date(weekStartDate);
+      currentDate.setDate(weekStartDate.getDate() + i);
+      const yyyy = currentDate.getFullYear();
+      const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(currentDate.getDate()).padStart(2, '0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+      const dayData = dayMap[dateKey];
+      if (!dayData) continue;
+
+      const offCheckbox = document.getElementById(`day_off_${i}`);
+      const holidayCheckbox = document.getElementById(`day_holiday_${i}`);
+      if (offCheckbox) offCheckbox.checked = !!dayData.is_off;
+      if (holidayCheckbox) holidayCheckbox.checked = !!dayData.is_holiday;
+
+      const memo = document.getElementById(`memo_${i}`);
+      if (memo) memo.value = dayData.memo || '';
+
+      const segmentsDiv = document.getElementById(`segments_${i}`);
+      if (segmentsDiv) {
+        segmentsDiv.innerHTML = '';
+        segmentCounts[i] = 0;
+        const segments = dayData.segments || [];
+        if (segments.length === 0) {
+          const seg = createSegmentElement(i, 0, '09:00', '18:00', false);
+          segmentsDiv.appendChild(seg);
+          segmentCounts[i] = 1;
+        } else {
+          segments.forEach((seg, idx) => {
+            const canRemove = idx > 0;
+            const el = createSegmentElement(i, idx, seg.start, seg.end, canRemove);
+            segmentsDiv.appendChild(el);
+            segmentCounts[i] = idx + 1;
+          });
+        }
+      }
+
+      toggleDayWork(i);
+    }
+  }
+  initNormalWorkTimeSync();
+</script>
+
+<style>
+.day-work-card.opacity-50 {
+  opacity: 0.5;
+}
+.segment-item {
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 0.25rem;
+}
+/* 그리드 레이아웃 개선 */
+.day-work-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.day-work-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+.day-work-card .form-switch .form-check-input {
+  cursor: pointer;
+}
+.day-work-card[data-day="5"],
+.day-work-card[data-day="6"] {
+  border-color: rgba(220, 53, 69, 0.25);
+}
+.day-work-card[data-day="5"] .card-body,
+.day-work-card[data-day="6"] .card-body {
+  background: #fff7f7;
+}
+/* 가독성 중심 레이아웃 */
+.week-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 768px) {
+  .week-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1200px) {
+  .week-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.compact-card .card-body {
+  padding: 0.8rem;
+}
+.compact-card h6 {
+  font-size: 1rem;
+}
+.compact-card .form-label {
+  margin-bottom: 0.25rem;
+}
+.compact-card .form-select-sm,
+.compact-card .form-control-sm {
+  font-size: 0.85rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+.compact-card .btn-sm {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  font-size: 0.85rem;
+}
+.compact-card .segment-item {
+  padding: 0.5rem;
+}
+/* 작은 화면에서도 가독성 유지 */
+@media (max-width: 768px) {
+  .day-work-card .card-body {
+    padding: 0.75rem;
+  }
+}
+</style>
+
+{% endblock %}
