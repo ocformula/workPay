@@ -1,0 +1,32 @@
+# Version control
+.git
+.gitignore
+
+# Data
+data/
+*.sqlite3
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Frontend dev deps
+frontend/node_modules/
+frontend/dist/
+
+# Docs/deploy (not needed in image)
+docs/
+deploy/
+
+# Container
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
