@@ -1,8 +1,11 @@
 import os
 
-# App directory and DB location
+# App directory (source code root)
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(APP_DIR, "workpay.sqlite3")
+
+# Data directory (separate from source, mounted via volume in Docker)
+DATA_DIR = os.environ.get("WORKPAY_DATA_DIR", os.path.join(os.path.dirname(APP_DIR), "data"))
+DB_PATH = os.path.join(DATA_DIR, "workpay.sqlite3")
 
 # Week starts on Monday (ISO: Monday=0)
 WEEK_START_ISO = 0
