@@ -1,74 +1,117 @@
 #!/bin/bash
-# WorkPay Calculator 서비스 설치 스크립트
-# Rocky Linux용 systemd 서비스 설정
+# WorkPay 서비스 설치 스크립트 (Rocky Linux / 베어메탈)
+# Docker 사용 시 이 스크립트 불필요. docker compose up 으로 대체.
 
 set -e
 
-# 색상 정의
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${GREEN}WorkPay Calculator 서비스 설치${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  WorkPay 서비스 설치${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo ""
 
-# 현재 사용자 확인
-CURRENT_USER=$(whoami)
-CURRENT_GROUP=$(id -gn)
-echo -e "현재 사용자: ${YELLOW}${CURRENT_USER}${NC}"
-echo -e "현재 그룹: ${YELLOW}${CURRENT_GROUP}${NC}"
+# ---------- 경로 ----------
+SERVICE_DIR="/srv/workpay"
+DATA_DIR="/var/lib/workpay"
+CONF_FILE="/etc/workpay.conf"
+VENV_DIR="${SERVICE_DIR}/.venv"
+
+# ---------- 사전 조건 ----------
+echo -e "📦 사전 조건 확인 중..."
+
+# Python 3.9+
+if ! command -v python3 &>/dev/null; then
+    echo -e "${RED}❌ python3가 설치되어 있지 않습니다.${NC}"
+    echo "   sudo dnf install python3"
+    exit 1
+fi
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+echo -e "   Python: ${YELLOW}${PY_VER}${NC}"
+
+# Node.js 20+
+if ! command -v node &>/dev/null; then
+    echo -e "${YELLOW}⚠️  node가 없습니다. 프론트엔드 빌드를 위해 설치합니다.${NC}"
+    sudo dnf install -y nodejs || {
+        echo -e "${RED}❌ nodejs 설치가 실패했습니다. 수동으로 설치해주세요.${NC}"
+        exit 1
+    }
+fi
+NODE_VER=$(node -v)
+echo -e "   Node.js: ${YELLOW}${NODE_VER}${NC}"
+
+# npm
+if ! command -v npm &>/dev/null; then
+    echo -e "${RED}❌ npm이 없습니다.${NC}"
+    exit 1
+fi
+echo -e "   npm: ${YELLOW}$(npm -v)${NC}"
 echo ""
 
-# 프로젝트 경로 확인
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_DIR="/workpay_calculator_only"
-echo -e "프로젝트 디렉토리: ${YELLOW}${PROJECT_DIR}${NC}"
+# ---------- 설정 파일 ----------
+echo -e "📝 설정 파일 확인 중..."
+if [ ! -f "${CONF_FILE}" ]; then
+    echo -e "${YELLOW}⚠️  ${CONF_FILE}이 없습니다. 기본값으로 생성합니다.${NC}"
+    sudo tee "${CONF_FILE}" > /dev/null << CONF
+# WorkPay Configuration
+# Generate SECRET_KEY: openssl rand -hex 32
+SECRET_KEY=$(openssl rand -hex 32)
+ADMIN_PASSWORD=password
+CONF
+    sudo chmod 600 "${CONF_FILE}"
+    echo -e "   ${GREEN}생성 완료 (${CONF_FILE})${NC}"
+else
+    echo -e "   ${GREEN}이미 존재${NC}"
+fi
+echo ""
 
-if [ ! -d "${PROJECT_DIR}" ]; then
-    echo -e "${RED}오류: ${PROJECT_DIR} 디렉토리를 찾을 수 없습니다.${NC}"
+# ---------- 프론트엔드 빌드 ----------
+echo -e "🔨 프론트엔드 빌드 중..."
+FRONTEND_DIR="${SERVICE_DIR}/frontend"
+if [ ! -d "${FRONTEND_DIR}" ]; then
+    echo -e "${RED}❌ ${FRONTEND_DIR} 디렉토리가 없습니다.${NC}"
+    echo "   먼저 git clone 하세요:"
+    echo "   sudo git clone <repo_url> ${SERVICE_DIR}"
     exit 1
 fi
 
-# 가상환경 확인
-VENV_DIR="${SCRIPT_DIR}/venv"
-if [ ! -d "${VENV_DIR}" ]; then
-    echo -e "${YELLOW}가상환경이 없습니다. 생성하시겠습니까? (y/n)${NC}"
-    read -r response
-    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        echo "가상환경 생성 중..."
-        python3 -m venv "${VENV_DIR}"
-        echo "가상환경 활성화 및 패키지 설치 중..."
-        source "${VENV_DIR}/bin/activate"
-        pip install --upgrade pip
-        pip install -r "${PROJECT_DIR}/requirements.txt"
-        deactivate
-        echo -e "${GREEN}가상환경 생성 완료${NC}"
-    else
-        VENV_DIR=""
-        echo -e "${YELLOW}가상환경 없이 진행합니다.${NC}"
-    fi
-fi
-
-# Python 경로 확인
-if [ -n "${VENV_DIR}" ] && [ -d "${VENV_DIR}" ]; then
-    PYTHON_PATH="${VENV_DIR}/bin/python"
-    FLASK_PATH="${VENV_DIR}/bin/flask"
-else
-    PYTHON_PATH=$(which python3)
-    FLASK_PATH=$(which flask)
-    if [ -z "${FLASK_PATH}" ]; then
-        FLASK_PATH="${PYTHON_PATH} -m flask"
-    fi
-fi
-
-echo -e "Python 경로: ${YELLOW}${PYTHON_PATH}${NC}"
-echo -e "Flask 경로: ${YELLOW}${FLASK_PATH}${NC}"
+cd "${FRONTEND_DIR}"
+echo "   npm ci ..."
+npm ci
+echo "   npm run build ..."
+npm run build
+echo -e "   ${GREEN}빌드 완료${NC}"
 echo ""
 
-# 서비스 파일 생성
-SERVICE_FILE="/tmp/workpay-calculator.service"
-cat > "${SERVICE_FILE}" << EOF
+# ---------- Python 가상환경 ----------
+echo -e "🐍 Python 가상환경 설정 중..."
+if [ ! -d "${VENV_DIR}" ]; then
+    echo "   venv 생성 중..."
+    python3 -m venv "${VENV_DIR}"
+fi
+
+echo "   패키지 설치 중..."
+"${VENV_DIR}/bin/pip" install --upgrade pip
+"${VENV_DIR}/bin/pip" install -r "${SERVICE_DIR}/src/requirements.txt"
+echo -e "   ${GREEN}완료${NC}"
+echo ""
+
+# ---------- 데이터 디렉토리 ----------
+echo -e "💾 데이터 디렉토리 확인 중..."
+sudo mkdir -p "${DATA_DIR}"
+sudo chown "$(whoami):$(id -gn)" "${DATA_DIR}" 2>/dev/null || true
+echo -e "   ${GREEN}${DATA_DIR}${NC}"
+echo ""
+
+# ---------- systemd 서비스 ----------
+echo -e "⚙️  systemd 서비스 설정 중..."
+CURRENT_USER=$(whoami)
+CURRENT_GROUP=$(id -gn)
+
+sudo tee /etc/systemd/system/workpay-calculator.service > /dev/null << SVC
 [Unit]
 Description=WorkPay Calculator Flask Application
 After=network.target
@@ -77,79 +120,60 @@ After=network.target
 Type=simple
 User=${CURRENT_USER}
 Group=${CURRENT_GROUP}
-WorkingDirectory=${PROJECT_DIR}
+WorkingDirectory=${SERVICE_DIR}/src
+EnvironmentFile=${CONF_FILE}
 Environment="PATH=${VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="FLASK_APP=${PROJECT_DIR}/app.py"
-ExecStart=${PYTHON_PATH} -m flask run --host=0.0.0.0 --port=8888
+Environment="WORKPAY_DATA_DIR=${DATA_DIR}"
+Environment="FLASK_APP=app.py"
+ExecStart=${VENV_DIR}/bin/python -m flask run --host=0.0.0.0 --port=8888
 
-# 자동 재시작 설정
 Restart=always
 RestartSec=10
 
-# 로그 설정
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=workpay-calculator
 
+NoNewPrivileges=true
+PrivateTmp=true
+
 [Install]
 WantedBy=multi-user.target
-EOF
+SVC
 
-echo -e "${GREEN}서비스 파일 생성 완료${NC}"
-echo ""
-echo "서비스 파일 내용:"
-echo "----------------------------------------"
-cat "${SERVICE_FILE}"
-echo "----------------------------------------"
+sudo systemctl daemon-reload
+echo -e "   ${GREEN}서비스 파일 설치 완료${NC}"
 echo ""
 
-# 서비스 파일 설치 확인
-echo -e "${YELLOW}서비스 파일을 /etc/systemd/system/에 복사하시겠습니까? (sudo 권한 필요) (y/n)${NC}"
-read -r response
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    sudo cp "${SERVICE_FILE}" /etc/systemd/system/workpay-calculator.service
-    sudo chmod 644 /etc/systemd/system/workpay-calculator.service
-    echo -e "${GREEN}서비스 파일 설치 완료${NC}"
-    
-    # systemd 리로드
-    echo "systemd 데몬 리로드 중..."
-    sudo systemctl daemon-reload
-    echo -e "${GREEN}systemd 리로드 완료${NC}"
-    
-    # 서비스 활성화 확인
+# ---------- 서비스 시작 ----------
+echo -e "${YELLOW}서비스를 시작하고 부팅 시 자동 시작하시겠습니까? (y/n)${NC}"
+read -r START_NOW
+if [[ "$START_NOW" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    sudo systemctl enable workpay-calculator.service
+    sudo systemctl start workpay-calculator.service
     echo ""
-    echo -e "${YELLOW}서비스를 지금 시작하고 부팅 시 자동 시작하도록 설정하시겠습니까? (y/n)${NC}"
-    read -r response2
-    if [[ "$response2" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-        sudo systemctl enable workpay-calculator.service
-        sudo systemctl start workpay-calculator.service
-        echo -e "${GREEN}서비스 시작 및 자동 시작 설정 완료${NC}"
-        echo ""
-        echo "서비스 상태 확인:"
-        sudo systemctl status workpay-calculator.service
-    else
-        echo ""
-        echo "수동으로 서비스를 시작하려면:"
-        echo -e "  ${YELLOW}sudo systemctl enable workpay-calculator.service${NC}"
-        echo -e "  ${YELLOW}sudo systemctl start workpay-calculator.service${NC}"
-    fi
-else
+    echo -e "${GREEN}✅ 서비스 시작 완료${NC}"
     echo ""
-    echo "서비스 파일 위치: ${SERVICE_FILE}"
-    echo "수동으로 설치하려면:"
-    echo -e "  ${YELLOW}sudo cp ${SERVICE_FILE} /etc/systemd/system/workpay-calculator.service${NC}"
-    echo -e "  ${YELLOW}sudo systemctl daemon-reload${NC}"
-    echo -e "  ${YELLOW}sudo systemctl enable workpay-calculator.service${NC}"
-    echo -e "  ${YELLOW}sudo systemctl start workpay-calculator.service${NC}"
+    echo "   상태 확인: sudo systemctl status workpay-calculator"
+    echo "   로그 확인: sudo journalctl -u workpay-calculator -f"
+    echo "   브라우저:  http://$(hostname -I | awk '{print $1}'):8888"
 fi
 
 echo ""
-echo -e "${GREEN}설치 완료!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  설치 완료!${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "유용한 명령어:"
-echo "  서비스 상태 확인: sudo systemctl status workpay-calculator"
-echo "  서비스 시작:      sudo systemctl start workpay-calculator"
-echo "  서비스 중지:      sudo systemctl stop workpay-calculator"
-echo "  서비스 재시작:    sudo systemctl restart workpay-calculator"
-echo "  로그 확인:        sudo journalctl -u workpay-calculator -f"
-echo "  자동 시작 해제:    sudo systemctl disable workpay-calculator"
+echo "📌 유용한 명령어:"
+echo "  상태 확인:  sudo systemctl status workpay-calculator"
+echo "  시작:       sudo systemctl start workpay-calculator"
+echo "  중지:       sudo systemctl stop workpay-calculator"
+echo "  재시작:     sudo systemctl restart workpay-calculator"
+echo "  로그:       sudo journalctl -u workpay-calculator -f"
+echo ""
+echo "🔄 업데이트 방법:"
+echo "  cd ${SERVICE_DIR}"
+echo "  git pull"
+echo "  cd frontend && npm ci && npm run build"
+echo "  ${VENV_DIR}/bin/pip install -r ../src/requirements.txt"
+echo "  sudo systemctl restart workpay-calculator"
