@@ -1,14 +1,32 @@
+import os
+from pathlib import Path
+
 from flask import Flask, redirect, url_for
 
 from routes_calculator import register as register_calculator
+from config import DATA_DIR
+
+_SECRET_KEY_FILE = Path(DATA_DIR) / ".secret_key"
+
+
+def _load_secret_key() -> str:
+    """Load or generate a persistent secret key."""
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        return env_key
+    # Try loading from file
+    if _SECRET_KEY_FILE.exists():
+        return _SECRET_KEY_FILE.read_text().strip()
+    # Generate and persist
+    key = os.urandom(24).hex()
+    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+    _SECRET_KEY_FILE.write_text(key)
+    return key
 
 
 def create_app() -> Flask:
-    import os
     app = Flask(__name__)
-    # flash()를 쓰므로 secret_key 필요
-    # 환경 변수에서 읽거나, 없으면 랜덤 생성 (프로덕션에서는 반드시 환경 변수 사용)
-    app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+    app.secret_key = _load_secret_key()
 
     # Calculator routes only
     register_calculator(app)

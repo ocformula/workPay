@@ -1,0 +1,11 @@
+# WorkPay Configuration
+# Copy to /etc/workpay.conf and adjust values.
+
+# Fixed secret for Flask sessions (generate once: openssl rand -hex 32)
+SECRET_KEY=CHANGE_ME_TO_RANDOM_HEX_STRING
+
+# Admin panel password
+ADMIN_PASSWORD=password
+
+# Port (optional, controlled by docker-compose or systemd)
+# PORT=8888

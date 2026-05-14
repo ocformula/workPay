@@ -5,9 +5,10 @@ services:
       - "8888:8888"
     volumes:
       - workpay-data:/data
+    env_file:
+      - /etc/workpay.conf
     environment:
       - WORKPAY_DATA_DIR=/data
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-password}
     restart: unless-stopped
 
 volumes:
