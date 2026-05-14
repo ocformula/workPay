@@ -133,9 +133,33 @@
                   </td>
                 </tr>
               {% endfor %}
+              {% if agg_total_min is defined %}
+                <tr class="table-secondary fw-bold">
+                  <td>종합</td>
+                  <td class="text-end mono">{{ "%.1f"|format(agg_total_min/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(agg_bucket_15_min/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(agg_bucket_20_min/60) }}</td>
+                  <td class="text-end mono">{{ "%.1f"|format(agg_bucket_25_min/60) }}</td>
+                  <td class="text-end"></td>
+                  <td class="text-end"></td>
+                </tr>
+              {% endif %}
             </tbody>
           </table>
         </div>
+        {% if agg_total_min is defined %}
+          {% set agg_weighted_min = 1.5 * agg_bucket_15_min + 2.0 * agg_bucket_20_min + 2.5 * agg_bucket_25_min %}
+          <div class="mt-2 small text-muted">
+            (1.5배 × {{ "%.1f"|format(agg_bucket_15_min/60) }}h)
+            + (2.0배 × {{ "%.1f"|format(agg_bucket_20_min/60) }}h)
+            + (2.5배 × {{ "%.1f"|format(agg_bucket_25_min/60) }}h)
+            = {{ "%.2f"|format(agg_weighted_min/60) }}h
+            <br>
+            통상시급 * {{ "%.2f"|format(agg_weighted_min/60) }}h = 수당
+            <br><br>
+            통상시급 = 기본급 ÷ 209시간(월 소정근로시간)
+          </div>
+        {% endif %}
       {% else %}
         <div class="text-muted">저장된 내역이 없습니다.</div>
       {% endif %}
@@ -469,3 +493,4 @@
 {% endblock %}
 
 {% endblock %}
+

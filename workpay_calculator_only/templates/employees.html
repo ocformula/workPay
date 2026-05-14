@@ -39,22 +39,32 @@
 </div>
 
 {% if employees and employees|length > 0 %}
-  <script>
-    const select = document.getElementById("employeeSelect");
-    const goRegister = document.getElementById("goRegister");
-    const goDetail = document.getElementById("goDetail");
-    if (select && goRegister && goDetail) {
-      const registerBase = "{{ url_for('calculator_for_employee', employee_name='__EMP__') }}";
-      const detailBase = "{{ url_for('employee_detail', employee_name='__EMP__') }}";
-      const updateLinks = () => {
-        const name = select.value;
-        goRegister.href = registerBase.replace("__EMP__", name);
-        goDetail.href = detailBase.replace("__EMP__", name);
-      };
-      select.addEventListener("change", updateLinks);
-      updateLinks();
-    }
-  </script>
+
+<script>
+  const select = document.getElementById("employeeSelect");
+  const goRegister = document.getElementById("goRegister");
+  const goDetail = document.getElementById("goDetail");
+
+  const latestYmMap = {
+    {% for emp in employees %}
+      {{ emp.name | tojson }}: {{ emp.latest_ym | tojson }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  };
+
+  if (select && goRegister && goDetail) {
+    const registerBase = "{{ url_for('calculator_for_employee', employee_name='__EMP__') }}";
+    const detailBase = "{{ url_for('employee_detail', employee_name='__EMP__') }}";
+    const updateLinks = () => {
+      const name = select.value;
+      goRegister.href = registerBase.replace("__EMP__", name);
+      const ym = latestYmMap[name];
+      goDetail.href = detailBase.replace("__EMP__", name) + (ym ? "?ym=" + ym : "");
+    };
+    select.addEventListener("change", updateLinks);
+    updateLinks();
+  }
+</script>
+
 {% endif %}
 
 {% endblock %}

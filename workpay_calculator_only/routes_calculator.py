@@ -26,6 +26,11 @@ from db import (
     restore_deleted_calculation,
     purge_deleted_calculation,
     save_weekly_calculation,
+    get_worklogs,
+    get_worklog_by_id,
+    add_worklog,
+    update_worklog,
+    delete_worklog,
 )
 from time_utils import week_start
 
@@ -222,6 +227,7 @@ def register(app):
         overview = get_employee_overview()
         return render_template("employees.html", employees=overview)
 
+
     @app.route("/admin/employees", methods=["GET"])
     def admin_employees():
         require = _require_admin()
@@ -310,6 +316,12 @@ def register(app):
         for item in list_items:
             week_start_key = item["week_start_date"]
             week_counts[week_start_key] = week_counts.get(week_start_key, 0) + 1
+
+        # 집계용 총합 (현재 필터/뷰에 표시되는 항목만 합산)
+        total_week_total_min = sum(item["week_total_min"] for item in list_items) if list_items else 0
+        total_bucket_15_min = sum(item["bucket_15_total"] for item in list_items) if list_items else 0
+        total_bucket_20_min = sum(item["bucket_20_total"] for item in list_items) if list_items else 0
+        total_bucket_25_min = sum(item["bucket_25_total"] for item in list_items) if list_items else 0
 
         selected_calc = None
         merged_calc = None
@@ -458,44 +470,44 @@ def register(app):
                             day_result["break_times"] = []
 
                 # 이월 자동 생성 데이터는 이전 ERP 결과 기반 타임라인을 합산에 적용
+                def parse_timeline_label(base_date: date, label: str) -> Optional[Tuple[datetime, datetime]]:
+                    clean_label = label.replace("[휴일] ", "").strip()
+                    if "~" not in clean_label:
+                        return None
+                    left, right = clean_label.split("~", 1)
+                    left = left.strip()
+                    right = right.strip()
+
+                    def parse_part(part: str) -> Tuple[Optional[int], Optional[int], int, int]:
+                        if "/" in part:
+                            date_part, time_part = part.split(" ", 1)
+                            month_str, day_str = date_part.split("/", 1)
+                            hour_str, min_str = time_part.split(":", 1)
+                            return int(month_str), int(day_str), int(hour_str), int(min_str)
+                        hour_str, min_str = part.split(":", 1)
+                        return None, None, int(hour_str), int(min_str)
+
+                    l_month, l_day, l_hour, l_min = parse_part(left)
+                    r_month, r_day, r_hour, r_min = parse_part(right)
+
+                    if l_month is None:
+                        start_dt = datetime.combine(base_date, time(l_hour, l_min))
+                    else:
+                        start_dt = datetime(base_date.year, l_month, l_day, l_hour, l_min)
+
+                    if r_month is None:
+                        end_dt = datetime.combine(start_dt.date(), time(r_hour, r_min))
+                        if end_dt <= start_dt:
+                            end_dt += timedelta(days=1)
+                    else:
+                        end_year = base_date.year
+                        if r_month < (l_month or start_dt.month):
+                            end_year += 1
+                        end_dt = datetime(end_year, r_month, r_day, r_hour, r_min)
+
+                    return start_dt, end_dt
+
                 if auto_rows:
-                    def parse_timeline_label(base_date: date, label: str) -> Optional[Tuple[datetime, datetime]]:
-                        clean_label = label.replace("[휴일] ", "").strip()
-                        if "~" not in clean_label:
-                            return None
-                        left, right = clean_label.split("~", 1)
-                        left = left.strip()
-                        right = right.strip()
-
-                        def parse_part(part: str) -> Tuple[Optional[int], Optional[int], int, int]:
-                            if "/" in part:
-                                date_part, time_part = part.split(" ", 1)
-                                month_str, day_str = date_part.split("/", 1)
-                                hour_str, min_str = time_part.split(":", 1)
-                                return int(month_str), int(day_str), int(hour_str), int(min_str)
-                            hour_str, min_str = part.split(":", 1)
-                            return None, None, int(hour_str), int(min_str)
-
-                        l_month, l_day, l_hour, l_min = parse_part(left)
-                        r_month, r_day, r_hour, r_min = parse_part(right)
-
-                        if l_month is None:
-                            start_dt = datetime.combine(base_date, time(l_hour, l_min))
-                        else:
-                            start_dt = datetime(base_date.year, l_month, l_day, l_hour, l_min)
-
-                        if r_month is None:
-                            end_dt = datetime.combine(start_dt.date(), time(r_hour, r_min))
-                            if end_dt <= start_dt:
-                                end_dt += timedelta(days=1)
-                        else:
-                            end_year = base_date.year
-                            if r_month < (l_month or start_dt.month):
-                                end_year += 1
-                            end_dt = datetime(end_year, r_month, r_day, r_hour, r_min)
-
-                        return start_dt, end_dt
-
                     override_by_date: dict[date, list[dict]] = {}
                     carryover_ranges_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
                     for row in auto_rows:
@@ -959,6 +971,10 @@ def register(app):
             selected_ym=selected_ym,
             year_months=year_months,
             year_month_groups=year_month_groups,
+            agg_total_min=total_week_total_min,
+            agg_bucket_15_min=total_bucket_15_min,
+            agg_bucket_20_min=total_bucket_20_min,
+            agg_bucket_25_min=total_bucket_25_min,
         )
 
     @app.route("/employees/<employee_name>/review")
@@ -1449,7 +1465,102 @@ def register(app):
         except Exception as e:
             flash(f"계산 중 오류가 발생했습니다: {str(e)}", "danger")
             return redirect(url_for("calculator"))
-    
+
+    # ── 근무일지 라우트 ─────────────────────────────────────────
+
+    @app.route("/worklog")
+    def worklog_list():
+        logs = get_worklogs()
+        employees = get_employees()
+        selected_year = request.args.get("year")
+        selected_ym   = request.args.get("ym")
+
+        # 연도/월 목록 생성
+        years = sorted({l["year"] for l in logs if l["year"]}, reverse=True)
+        ym_list = sorted({l["ym"] for l in logs if l["ym"]}, reverse=True)
+        year_month_groups: dict = {}
+        for ym in ym_list:
+            y, m = ym.split("-", 1)
+            year_month_groups.setdefault(y, []).append(m)
+        for y in year_month_groups:
+            year_month_groups[y] = sorted(set(year_month_groups[y]))
+
+        # 필터 적용
+        filtered = logs
+        if selected_year:
+            filtered = [l for l in filtered if l["year"] == selected_year]
+        if selected_ym:
+            filtered = [l for l in filtered if l["ym"] == selected_ym]
+
+        return render_template("worklog.html",
+            logs=filtered,
+            employees=employees,
+            year_month_groups=year_month_groups,
+            selected_year=selected_year,
+            selected_ym=selected_ym,
+        )
+
+    @app.route("/worklog/add", methods=["POST"])
+    def worklog_add():
+        client      = request.form.get("client", "").strip()
+        description = request.form.get("description", "").strip()
+        start_date  = request.form.get("start_date", "").strip()
+        start_time  = request.form.get("start_time", "").strip()
+        end_date    = request.form.get("end_date", "").strip()
+        end_time    = request.form.get("end_time", "").strip()
+        workers     = request.form.getlist("workers")
+        if not all([client, description, start_date, start_time, end_date, end_time]):
+            flash("모든 항목을 입력해주세요.", "danger")
+            return redirect(url_for("worklog_list"))
+        start_datetime = f"{start_date} {start_time}"
+        end_datetime   = f"{end_date} {end_time}"
+        add_worklog(client, description, start_datetime, end_datetime, workers)
+        flash("근무일지가 등록되었습니다.", "success")
+        return redirect(url_for("worklog_list"))
+
+    @app.route("/worklog/<int:worklog_id>/edit", methods=["GET", "POST"])
+    def worklog_edit(worklog_id: int):
+        log = get_worklog_by_id(worklog_id)
+        if not log:
+            flash("항목을 찾을 수 없습니다.", "danger")
+            return redirect(url_for("worklog_list"))
+        employees = get_employees()
+        if request.method == "POST":
+            client      = request.form.get("client", "").strip()
+            description = request.form.get("description", "").strip()
+            start_date  = request.form.get("start_date", "").strip()
+            start_time  = request.form.get("start_time", "").strip()
+            end_date    = request.form.get("end_date", "").strip()
+            end_time    = request.form.get("end_time", "").strip()
+            workers     = request.form.getlist("workers")
+            if not all([client, description, start_date, start_time, end_date, end_time]):
+                flash("모든 항목을 입력해주세요.", "danger")
+                return render_template("worklog.html",
+                    logs=get_worklogs(), employees=employees, edit_log=log,
+                    year_month_groups={}, selected_year=None, selected_ym=None)
+            start_datetime = f"{start_date} {start_time}"
+            end_datetime   = f"{end_date} {end_time}"
+            update_worklog(worklog_id, client, description, start_datetime, end_datetime, workers)
+            flash("수정되었습니다.", "success")
+            return redirect(url_for("worklog_list"))
+        logs = get_worklogs()
+        years = sorted({l["year"] for l in logs if l["year"]}, reverse=True)
+        ym_list = sorted({l["ym"] for l in logs if l["ym"]}, reverse=True)
+        year_month_groups: dict = {}
+        for ym in ym_list:
+            y, m = ym.split("-", 1)
+            year_month_groups.setdefault(y, []).append(m)
+        return render_template("worklog.html",
+            logs=logs, employees=employees, edit_log=log,
+            year_month_groups=year_month_groups,
+            selected_year=None, selected_ym=None)
+
+    @app.route("/worklog/<int:worklog_id>/delete", methods=["POST"])
+    def worklog_delete(worklog_id: int):
+        delete_worklog(worklog_id)
+        flash("삭제되었습니다.", "success")
+        return redirect(url_for("worklog_list"))
+
     @app.route("/calculator/export", methods=["POST"])
     def calculator_export():
         """계산 결과를 엑셀로 다운로드"""

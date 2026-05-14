@@ -611,6 +611,9 @@ def calculate_week_work(week_work: WeekWork, normal_start_hhmm: str = "09:00", n
         max_timeline_minutes = 1440  # 기본 24시간
         has_admin_interpretation = any(info.is_previous_day_overtime for info in minute_infos)
         if minute_infos:
+            # 타임라인 생성을 위해 시간순으로 정렬 (중요: 여러 세그먼트가 있을 때 시간순 정렬 필요)
+            sorted_minute_infos = sorted(minute_infos, key=lambda info: info.minute_dt)
+            
             # 시작 날짜의 첫 번째 분 (타임라인 기준점)
             timeline_base_date = day_work.work_date
             timeline_base_datetime = datetime.combine(timeline_base_date, time(0, 0))
@@ -619,8 +622,8 @@ def calculate_week_work(week_work: WeekWork, normal_start_hhmm: str = "09:00", n
             max_end_minutes = 0
             
             i = 0
-            while i < len(minute_infos):
-                info = minute_infos[i]
+            while i < len(sorted_minute_infos):
+                info = sorted_minute_infos[i]
                 is_break = info.is_break
                 if is_break:
                     bucket = "break"
@@ -630,27 +633,35 @@ def calculate_week_work(week_work: WeekWork, normal_start_hhmm: str = "09:00", n
                 
                 start_min = i
                 j = i + 1
-                while j < len(minute_infos):
-                    next_info = minute_infos[j]
+                while j < len(sorted_minute_infos):
+                    next_info = sorted_minute_infos[j]
                     next_is_break = next_info.is_break
                     next_bucket = "break" if next_is_break else next_info.get_bucket()
                     
                     # 같은 종류(휴게/근무)이고 같은 버킷이면 계속
                     if is_break == next_is_break and bucket == next_bucket:
                         if is_break:
-                            j += 1
-                            continue
+                            # 휴게시간은 시간상 연속되어야 함
+                            expected_next_time = sorted_minute_infos[j-1].minute_dt + timedelta(minutes=STEP_MIN)
+                            if next_info.minute_dt == expected_next_time:
+                                j += 1
+                                continue
+                            break
                         next_flags = (next_info.is_overtime, next_info.is_holiday, next_info.is_night)
                         if next_flags == base_flags:
-                            j += 1
-                            continue
+                            # 시간상 연속되어야 함 (STEP_MIN 간격)
+                            expected_next_time = sorted_minute_infos[j-1].minute_dt + timedelta(minutes=STEP_MIN)
+                            if next_info.minute_dt == expected_next_time:
+                                j += 1
+                                continue
+                            break
                         break
                     else:
                         break
                 
                 # 분을 시간으로 변환
-                start_dt = minute_infos[start_min].minute_dt
-                end_dt = minute_infos[j-1].minute_dt + timedelta(minutes=STEP_MIN)
+                start_dt = sorted_minute_infos[start_min].minute_dt
+                end_dt = sorted_minute_infos[j-1].minute_dt + timedelta(minutes=STEP_MIN)
                 
                 # 시작 날짜 기준으로 분 차이 계산 (날짜 경계를 넘는 경우도 처리)
                 start_minutes_from_base = int((start_dt - timeline_base_datetime).total_seconds() // 60)
@@ -676,8 +687,8 @@ def calculate_week_work(week_work: WeekWork, normal_start_hhmm: str = "09:00", n
                 
                 # 가산수당 계산 근거 설명 생성 (첫 번째 분 정보 사용)
                 calculation_info = ""
-                if not is_break and start_min < len(minute_infos):
-                    first_info = minute_infos[start_min]
+                if not is_break and start_min < len(sorted_minute_infos):
+                    first_info = sorted_minute_infos[start_min]
                     calculation_info = first_info.get_calculation_explanation()
                 
                 timeline_segments.append({

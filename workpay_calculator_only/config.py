@@ -20,14 +20,12 @@ BREAK_BLOCK_MIN = 30
 
 # Seed employees (first-run convenience)
 DEFAULT_EMPLOYEES = [
-    "직원1",
-    "직원2",
-    "직원3",
-    "직원4"
+    "정권희", "강수한", "박종철", "서신영", "이호섭",
+    "김영진", "김왕수", "최정엽", "엄두용", "김태원"
 ]
 
 # 관리자 비밀번호 (환경변수 ADMIN_PASSWORD가 있으면 우선)
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "password")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "wotjd12!@")
 
 # 근무 입력 드롭다운(30분 간격)
 TIME_OPTIONS = [f"{h:02d}:{m:02d}" for h in range(24) for m in range(0, 60, 30)]

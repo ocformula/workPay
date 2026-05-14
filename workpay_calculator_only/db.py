@@ -57,6 +57,35 @@ def init_db() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worklog (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client TEXT NOT NULL,
+                description TEXT NOT NULL,
+                start_datetime TEXT NOT NULL,
+                end_datetime TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worklog_workers (
+                worklog_id INTEGER NOT NULL,
+                employee_name TEXT NOT NULL,
+                PRIMARY KEY (worklog_id, employee_name),
+                FOREIGN KEY (worklog_id) REFERENCES worklog(id)
+            );
+            """
+        )
+        # 기존 컬럼이 있는 DB 마이그레이션 (구버전 호환)
+        _ensure_column(conn, "worklog", "start_datetime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "worklog", "end_datetime",   "TEXT NOT NULL DEFAULT ''")
+        # 구버전 DB의 work_date NOT NULL 제약을 우회 — SQLite는 컬럼 제약 변경 불가이므로
+        # INSERT 시 work_date 컬럼이 존재하면 빈 문자열 기본값 컬럼으로 간주하고 무시
+        # (새 DB는 work_date 컬럼 없음, 구 DB는 아래 _patch로 대응)
+        _patch_worklog_work_date(conn)
         _ensure_column(conn, "weekly_calculations", "needs_review", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "deleted_weekly_calculations", "needs_review", "INTEGER NOT NULL DEFAULT 0")
         for name in DEFAULT_EMPLOYEES:
@@ -71,6 +100,21 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
     existing = {row["name"] for row in cols}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl};")
+
+
+def _patch_worklog_work_date(conn: sqlite3.Connection) -> None:
+    """구버전 DB의 work_date NOT NULL 컬럼을 start_datetime 값으로 채워 제약 위반 방지"""
+    cols = conn.execute("PRAGMA table_info(worklog);").fetchall()
+    col_names = {row["name"] for row in cols}
+    if "work_date" not in col_names:
+        return
+    # start_datetime이 있는 행 중 work_date가 비어있으면 채움
+    conn.execute("""
+        UPDATE worklog
+        SET work_date = substr(start_datetime, 1, 10)
+        WHERE (work_date IS NULL OR work_date = '')
+          AND start_datetime != '';
+    """)
 
 
 def get_employees() -> List[str]:
@@ -89,14 +133,23 @@ def get_employee_overview() -> List[dict]:
     with _get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT e.name AS name, COUNT(w.id) AS calc_count
+            SELECT e.name AS name,
+                   COUNT(w.id) AS calc_count,
+                   MAX(w.week_start_date) AS latest_week_start
             FROM employees e
             LEFT JOIN weekly_calculations w ON w.employee_id = e.id
             GROUP BY e.id
             ORDER BY e.name;
             """
         ).fetchall()
-    return [{"name": row["name"], "calc_count": row["calc_count"]} for row in rows]
+    return [
+        {
+            "name": row["name"],
+            "calc_count": row["calc_count"],
+            "latest_ym": row["latest_week_start"][:7] if row["latest_week_start"] else None,
+        }
+        for row in rows
+    ]
 
 
 
@@ -318,3 +371,126 @@ def save_weekly_calculation(
                 result_json,
             ),
         )
+
+
+# ── 근무일지 CRUD ──────────────────────────────────────────────
+
+def get_worklogs() -> List[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT w.*, GROUP_CONCAT(ww.employee_name, ',') AS workers
+            FROM worklog w
+            LEFT JOIN worklog_workers ww ON ww.worklog_id = w.id
+            GROUP BY w.id
+            ORDER BY w.start_datetime DESC;
+            """
+        ).fetchall()
+    result = []
+    for row in rows:
+        start_dt = row["start_datetime"] or ""
+        result.append({
+            "id": row["id"],
+            "client": row["client"],
+            "description": row["description"],
+            "start_datetime": start_dt,
+            "end_datetime": row["end_datetime"] or "",
+            "start_date": start_dt[:10] if start_dt else "",
+            "ym": start_dt[:7] if start_dt else "",
+            "year": start_dt[:4] if start_dt else "",
+            "created_at": row["created_at"],
+            "workers": row["workers"].split(",") if row["workers"] else [],
+        })
+    return result
+
+
+def get_worklog_by_id(worklog_id: int) -> Optional[dict]:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM worklog WHERE id = ?;", (worklog_id,)
+        ).fetchone()
+        if not row:
+            return None
+        workers = conn.execute(
+            "SELECT employee_name FROM worklog_workers WHERE worklog_id = ?;",
+            (worklog_id,),
+        ).fetchall()
+    start_dt = row["start_datetime"] or ""
+    return {
+        "id": row["id"],
+        "client": row["client"],
+        "description": row["description"],
+        "start_datetime": start_dt,
+        "end_datetime": row["end_datetime"] or "",
+        "start_date": start_dt[:10] if start_dt else "",
+        "ym": start_dt[:7] if start_dt else "",
+        "year": start_dt[:4] if start_dt else "",
+        "created_at": row["created_at"],
+        "workers": [w["employee_name"] for w in workers],
+    }
+
+
+def add_worklog(client: str, description: str,
+                start_datetime: str, end_datetime: str,
+                workers: List[str]) -> int:
+    with _get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(worklog);").fetchall()}
+        fields = ["client", "description", "start_datetime", "end_datetime"]
+        values: list = [client, description, start_datetime, end_datetime]
+        if "work_date" in cols:
+            fields.append("work_date")
+            values.append(start_datetime[:10])
+        if "start_time" in cols:
+            fields.append("start_time")
+            values.append(start_datetime[11:])
+        if "end_time" in cols:
+            fields.append("end_time")
+            values.append(end_datetime[11:])
+        placeholders = ", ".join("?" * len(fields))
+        col_names = ", ".join(fields)
+        cur = conn.execute(
+            f"INSERT INTO worklog ({col_names}) VALUES ({placeholders});",
+            values,
+        )
+        worklog_id = cur.lastrowid
+        for name in workers:
+            conn.execute(
+                "INSERT OR IGNORE INTO worklog_workers (worklog_id, employee_name) VALUES (?, ?);",
+                (worklog_id, name),
+            )
+    return worklog_id
+
+
+def update_worklog(worklog_id: int, client: str, description: str,
+                   start_datetime: str, end_datetime: str,
+                   workers: List[str]) -> None:
+    with _get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(worklog);").fetchall()}
+        sets = ["client=?", "description=?", "start_datetime=?", "end_datetime=?"]
+        values: list = [client, description, start_datetime, end_datetime]
+        if "work_date" in cols:
+            sets.append("work_date=?")
+            values.append(start_datetime[:10])
+        if "start_time" in cols:
+            sets.append("start_time=?")
+            values.append(start_datetime[11:])
+        if "end_time" in cols:
+            sets.append("end_time=?")
+            values.append(end_datetime[11:])
+        values.append(worklog_id)
+        conn.execute(
+            f"UPDATE worklog SET {', '.join(sets)} WHERE id=?;",
+            values,
+        )
+        conn.execute("DELETE FROM worklog_workers WHERE worklog_id=?;", (worklog_id,))
+        for name in workers:
+            conn.execute(
+                "INSERT OR IGNORE INTO worklog_workers (worklog_id, employee_name) VALUES (?, ?);",
+                (worklog_id, name),
+            )
+
+
+def delete_worklog(worklog_id: int) -> None:
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM worklog_workers WHERE worklog_id=?;", (worklog_id,))
+        conn.execute("DELETE FROM worklog WHERE id=?;", (worklog_id,))

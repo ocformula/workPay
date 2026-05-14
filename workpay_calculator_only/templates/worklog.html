@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── 헤더 ── #}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h4 class="mb-0">근무일지</h4>
+  <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+    + 새 항목 등록
+  </button>
+</div>
+
+<div class="row g-3">
+
+  {# ── 좌측: 연도/월 필터 사이드바 ── #}
+  <div class="col-md-2">
+    <div class="card">
+      <div class="card-body p-2">
+        <div class="fw-semibold small text-muted mb-2 px-1">기간 필터</div>
+        <a href="{{ url_for('worklog_list') }}"
+           class="d-block px-2 py-1 rounded mb-1 text-decoration-none
+                  {% if not selected_year and not selected_ym %}fw-bold text-primary bg-primary bg-opacity-10{% else %}text-secondary{% endif %}">
+          전체
+        </a>
+        {% for year, months in year_month_groups.items() %}
+          <a href="{{ url_for('worklog_list', year=year) }}"
+             class="d-block px-2 py-1 rounded text-decoration-none
+                    {% if selected_year == year and not selected_ym %}fw-bold text-primary bg-primary bg-opacity-10{% else %}text-dark{% endif %}">
+            {{ year }}년
+          </a>
+          {% for month in months | sort(reverse=True) %}
+            <a href="{{ url_for('worklog_list', ym=year ~ '-' ~ month) }}"
+               class="d-block px-3 py-1 rounded text-decoration-none small
+                      {% if selected_ym == year ~ '-' ~ month %}fw-bold text-primary bg-primary bg-opacity-10{% else %}text-secondary{% endif %}">
+              {{ month }}월
+            </a>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {# ── 우측: 목록 테이블 ── #}
+  <div class="col-md-10">
+    <div class="card">
+      <div class="card-body p-0">
+        {% if logs %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width:150px">근무 시작</th>
+                <th style="width:150px">근무 종료</th>
+                <th style="width:120px">고객사</th>
+                <th>업무내용</th>
+                <th style="width:160px">근무자</th>
+                <th style="width:80px" class="text-center">관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% set ns = namespace(cur_ym='') %}
+              {% for log in logs %}
+                {% if log.ym != ns.cur_ym %}
+                  {% set ns.cur_ym = log.ym %}
+                  <tr class="table-secondary">
+                    <td colspan="6" class="small fw-bold text-muted py-1 px-3">
+                      {{ log.ym[:4] }}년 {{ log.ym[5:7] }}월
+                    </td>
+                  </tr>
+                {% endif %}
+                <tr>
+                  <td class="text-nowrap">
+                    <div class="text-muted small">{{ log.start_datetime[:10] }}</div>
+                    <div class="mono fw-bold fs-6 text-primary">{{ log.start_datetime[11:] }}</div>
+                  </td>
+                  <td class="text-nowrap">
+                    <div class="text-muted small">{{ log.end_datetime[:10] }}</div>
+                    <div class="mono fw-bold fs-6 text-primary">{{ log.end_datetime[11:] }}</div>
+                  </td>
+                  <td>{{ log.client }}</td>
+                  <td style="white-space:pre-wrap; max-width:300px">{{ log.description }}</td>
+                  <td>
+                    {% for w in log.workers %}
+                      <span class="badge bg-secondary me-1">{{ w }}</span>
+                    {% else %}
+                      <span class="text-muted small">-</span>
+                    {% endfor %}
+                  </td>
+                  <td class="text-center text-nowrap">
+                    <a href="{{ url_for('worklog_edit', worklog_id=log.id) }}"
+                       class="btn btn-outline-secondary btn-sm py-0 px-2 me-1">수정</a>
+                    <form method="post"
+                          action="{{ url_for('worklog_delete', worklog_id=log.id) }}"
+                          class="d-inline"
+                          onsubmit="return confirm('삭제하시겠습니까?')">
+                      <button class="btn btn-outline-danger btn-sm py-0 px-2">삭제</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-5">등록된 근무일지가 없습니다.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>{# /row #}
+
+
+{# ── 등록 모달 ── #}
+<div class="modal fade" id="addModal" tabindex="-1" aria-labelledby="addModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('worklog_add') }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addModalLabel">근무일지 등록</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+
+            <div class="col-12">
+              <div class="fw-semibold mb-2">근무 시작 <span class="text-danger">*</span></div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">날짜</label>
+                  <input type="date" name="start_date" class="form-control" required>
+                </div>
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">시간 (24시간, 예: 22:30)</label>
+                  <input type="text" name="start_time" class="form-control mono"
+                         placeholder="HH:MM" maxlength="5"
+                         pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+                         title="HH:MM 형식으로 입력하세요 (예: 09:00, 22:30)" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="fw-semibold mb-2">근무 종료 <span class="text-danger">*</span></div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">날짜</label>
+                  <input type="date" name="end_date" class="form-control" required>
+                </div>
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">시간 (24시간, 예: 06:00)</label>
+                  <input type="text" name="end_time" class="form-control mono"
+                         placeholder="HH:MM" maxlength="5"
+                         pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+                         title="HH:MM 형식으로 입력하세요 (예: 09:00, 22:30)" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">고객사 <span class="text-danger">*</span></label>
+              <input type="text" name="client" class="form-control" placeholder="고객사명 입력" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">업무내용 <span class="text-danger">*</span></label>
+              <textarea name="description" class="form-control" rows="3"
+                        placeholder="업무 내용을 입력하세요" required></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">근무자</label>
+              <div class="d-flex flex-wrap gap-2 border rounded p-2 bg-white">
+                {% for emp in employees %}
+                <div class="form-check me-2">
+                  <input class="form-check-input" type="checkbox"
+                         name="workers" value="{{ emp }}" id="add_w_{{ loop.index }}">
+                  <label class="form-check-label" for="add_w_{{ loop.index }}">{{ emp }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="submit" class="btn btn-success">등록</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+{# ── 수정 모달 ── #}
+{% if edit_log %}
+{% set s_date = edit_log.start_datetime[:10] %}
+{% set s_time = edit_log.start_datetime[11:] %}
+{% set e_date = edit_log.end_datetime[:10] %}
+{% set e_time = edit_log.end_datetime[11:] %}
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('worklog_edit', worklog_id=edit_log.id) }}">
+        <div class="modal-header">
+          <h5 class="modal-title">근무일지 수정</h5>
+          <a href="{{ url_for('worklog_list') }}" class="btn-close"></a>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+
+            <div class="col-12">
+              <div class="fw-semibold mb-2">근무 시작</div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">날짜</label>
+                  <input type="date" name="start_date" class="form-control"
+                         value="{{ s_date }}" required>
+                </div>
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">시간 (24시간, 예: 22:30)</label>
+                  <input type="text" name="start_time" class="form-control mono"
+                         placeholder="HH:MM" maxlength="5"
+                         pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+                         title="HH:MM 형식으로 입력하세요 (예: 09:00, 22:30)"
+                         value="{{ s_time }}" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="fw-semibold mb-2">근무 종료</div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">날짜</label>
+                  <input type="date" name="end_date" class="form-control"
+                         value="{{ e_date }}" required>
+                </div>
+                <div class="col-6">
+                  <label class="form-label small text-muted mb-1">시간 (24시간, 예: 06:00)</label>
+                  <input type="text" name="end_time" class="form-control mono"
+                         placeholder="HH:MM" maxlength="5"
+                         pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+                         title="HH:MM 형식으로 입력하세요 (예: 09:00, 22:30)"
+                         value="{{ e_time }}" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">고객사</label>
+              <input type="text" name="client" class="form-control"
+                     value="{{ edit_log.client }}" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">업무내용</label>
+              <textarea name="description" class="form-control" rows="3" required>{{ edit_log.description }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">근무자</label>
+              <div class="d-flex flex-wrap gap-2 border rounded p-2 bg-white">
+                {% for emp in employees %}
+                <div class="form-check me-2">
+                  <input class="form-check-input" type="checkbox"
+                         name="workers" value="{{ emp }}" id="edit_w_{{ loop.index }}"
+                         {% if emp in edit_log.workers %}checked{% endif %}>
+                  <label class="form-check-label" for="edit_w_{{ loop.index }}">{{ emp }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a href="{{ url_for('worklog_list') }}" class="btn btn-secondary">취소</a>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    new bootstrap.Modal(document.getElementById("editModal")).show();
+  });
+</script>
+{% endif %}
+
+{% endblock %}
