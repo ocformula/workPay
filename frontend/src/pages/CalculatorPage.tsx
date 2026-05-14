@@ -2,11 +2,31 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import {
   Card, DatePicker, TimePicker, Button, Space, Divider, Typography, Tag,
+  Checkbox, Select, TextArea,
 } from '@douyinfe/semi-ui'
 import { submitCalculation } from '../services/api'
 
 const { Title, Text } = Typography
 const DAYS = ['월', '화', '수', '목', '금', '토', '일']
+
+// 30분 간격 시간 옵션
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
+  const h = Math.floor(i / 2)
+  const m = (i % 2) * 30
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+})
+
+interface Segment {
+  start: string
+  end: string
+}
+
+interface DayData {
+  is_off: boolean
+  is_holiday: boolean
+  memo: string
+  segments: Segment[]
+}
 
 function CalculatorPage() {
   const { employeeName } = useParams<{ employeeName: string }>()
@@ -21,11 +41,46 @@ function CalculatorPage() {
   const [normalEnd, setNormalEnd] = useState('18:00')
   const [submitting, setSubmitting] = useState(false)
 
+  // 7일 데이터
+  const [days, setDays] = useState<DayData[]>(() =>
+    Array.from({ length: 7 }, (_, i) => ({
+      is_off: i >= 5, // 토/일 기본 휴무
+      is_holiday: i === 6, // 일요일 기본 휴일
+      memo: '',
+      segments: i < 5 ? [{ start: '09:00', end: '18:00' }] : [],
+    }))
+  )
+
   const weekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
     d.setDate(weekStart.getDate() + i)
     return d
   })
+
+  const updateDay = (idx: number, patch: Partial<DayData>) => {
+    setDays(prev => prev.map((d, i) => i === idx ? { ...d, ...patch } : d))
+  }
+
+  const addSegment = (dayIdx: number) => {
+    setDays(prev => prev.map((d, i) =>
+      i === dayIdx ? { ...d, segments: [...d.segments, { start: '09:00', end: '18:00' }] } : d
+    ))
+  }
+
+  const removeSegment = (dayIdx: number, segIdx: number) => {
+    setDays(prev => prev.map((d, i) =>
+      i === dayIdx ? { ...d, segments: d.segments.filter((_, si) => si !== segIdx) } : d
+    ))
+  }
+
+  const updateSegment = (dayIdx: number, segIdx: number, field: 'start' | 'end', value: string) => {
+    setDays(prev => prev.map((d, i) => {
+      if (i !== dayIdx) return d
+      const newSegments = [...d.segments]
+      newSegments[segIdx] = { ...newSegments[segIdx], [field]: value }
+      return { ...d, segments: newSegments }
+    }))
+  }
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -35,15 +90,15 @@ function CalculatorPage() {
         week_start_date: weekStart.toISOString().slice(0, 10),
         normal_start: normalStart,
         normal_end: normalEnd,
-        days: weekDates.map((d) => ({
-          date: d.toISOString().slice(0, 10),
-          is_off: false,
-          is_holiday: false,
-          memo: '',
-          segments: [],
+        days: days.map((d, i) => ({
+          date: weekDates[i].toISOString().slice(0, 10),
+          ...d,
         })),
       }
-      await submitCalculation(payload)
+      // Compute result and store for ResultPage
+      const res = await submitCalculation(payload)
+      sessionStorage.setItem('calc_result', JSON.stringify(res.data))
+      sessionStorage.setItem('calc_input', JSON.stringify(payload))
       navigate('/calculator/result')
     } finally {
       setSubmitting(false)
@@ -84,20 +139,77 @@ function CalculatorPage() {
 
       <Divider />
 
-      {weekDates.map((d, i) => {
-        const dateStr = d.toISOString().slice(0, 10)
-        return (
-          <div key={i} style={{ marginBottom: 16 }}>
-            <Tag color="blue">{DAYS[i]}</Tag>{' '}
-            <Text strong>{dateStr}</Text>
-          </div>
-        )
-      })}
+      {days.map((day, i) => (
+        <div key={i} style={{ marginBottom: 24, padding: 16, border: '1px solid #e5e6eb', borderRadius: 8 }}>
+          <Space style={{ marginBottom: 12 }}>
+            <Tag color="blue">{DAYS[i]}</Tag>
+            <Text strong>{weekDates[i].toLocaleDateString()}</Text>
+            <Checkbox
+              checked={day.is_off}
+              onChange={(e) => updateDay(i, { is_off: e.target.checked })}
+            >
+              근무 안함
+            </Checkbox>
+            <Checkbox
+              checked={day.is_holiday}
+              onChange={(e) => updateDay(i, { is_holiday: e.target.checked })}
+            >
+              휴일
+            </Checkbox>
+          </Space>
+
+          {!day.is_off && (
+            <>
+              {day.segments.map((seg, si) => (
+                <Space key={si} style={{ marginBottom: 8 }}>
+                  <Select
+                    value={seg.start}
+                    onChange={(val) => updateSegment(i, si, 'start', val as string)}
+                    style={{ width: 120 }}
+                  >
+                    {TIME_OPTIONS.map(t => (
+                      <Select.Option key={t} value={t}>{t}</Select.Option>
+                    ))}
+                  </Select>
+                  <Text>~</Text>
+                  <Select
+                    value={seg.end}
+                    onChange={(val) => updateSegment(i, si, 'end', val as string)}
+                    style={{ width: 120 }}
+                  >
+                    {TIME_OPTIONS.map(t => (
+                      <Select.Option key={t} value={t}>{t}</Select.Option>
+                    ))}
+                  </Select>
+                  {day.segments.length > 1 && (
+                    <Button size="small" type="danger" onClick={() => removeSegment(i, si)}>
+                      ✕
+                    </Button>
+                  )}
+                </Space>
+              ))}
+              <Button size="small" style={{ marginTop: 4 }} onClick={() => addSegment(i)}>
+                + 시간대 추가
+              </Button>
+              <TextArea
+                placeholder="메모"
+                value={day.memo}
+                onChange={(val) => updateDay(i, { memo: val })}
+                style={{ marginTop: 8 }}
+                autosize
+              />
+            </>
+          )}
+        </div>
+      ))}
 
       <Divider />
-      <Button theme="solid" type="primary" onClick={handleSubmit} loading={submitting}>
-        계산하기
-      </Button>
+      <Space>
+        <Button theme="solid" type="primary" onClick={handleSubmit} loading={submitting}>
+          계산 및 저장
+        </Button>
+        <Button onClick={() => navigate('/employees')}>취소</Button>
+      </Space>
     </Card>
   )
 }

@@ -1,9 +1,9 @@
 """REST API wrappers for the React SPA frontend."""
 import json
-from flask import jsonify, request, session, redirect, url_for
+from datetime import date, datetime, time, timedelta
+from flask import jsonify, request, session, abort
 
 from db import (
-    get_employees,
     get_employee_overview,
     get_employee_calculations,
     get_employee_admin_list,
@@ -15,11 +15,14 @@ from db import (
     purge_deleted_calculation,
     save_weekly_calculation,
 )
+from calc_weekly import WeekWork, DayWork, WorkSegment, calculate_week_work
 from config import ADMIN_PASSWORD
 
 
 def register_api(app):
     """Register /api/* routes returning JSON."""
+
+    # --------------- Employees ---------------
 
     @app.route("/api/employees")
     def api_employees():
@@ -30,6 +33,8 @@ def register_api(app):
         rows = get_employee_calculations(employee_name)
         items = []
         for row in rows:
+            result = json.loads(row["result_json"])
+            inp = json.loads(row["input_json"])
             items.append({
                 "id": row["id"],
                 "week_start_date": row["week_start_date"],
@@ -37,39 +42,119 @@ def register_api(app):
                 "normal_start": row["normal_start"],
                 "normal_end": row["normal_end"],
                 "created_at": row["created_at"],
-                "week_total_min": json.loads(row["result_json"]).get("week_total_min", 0),
-                "bucket_15_total": json.loads(row["result_json"]).get("bucket_15_total", 0),
-                "bucket_20_total": json.loads(row["result_json"]).get("bucket_20_total", 0),
-                "bucket_25_total": json.loads(row["result_json"]).get("bucket_25_total", 0),
+                "week_total_min": result.get("week_total_min", 0),
+                "bucket_15_total": result.get("bucket_15_total", 0),
+                "bucket_20_total": result.get("bucket_20_total", 0),
+                "bucket_25_total": result.get("bucket_25_total", 0),
                 "needs_review": bool(row["needs_review"]) if "needs_review" in row.keys() else False,
-                "auto_carryover": bool(json.loads(row["input_json"]).get("auto_carryover")),
-                "carryover_from": json.loads(row["input_json"]).get("carryover_from"),
+                "auto_carryover": bool(inp.get("auto_carryover")),
+                "carryover_from": inp.get("carryover_from"),
             })
         return jsonify(items)
 
+    # --------------- Calculator ---------------
+
     @app.route("/api/calculator/result", methods=["POST"])
     def api_calculator_result():
-        """Receive calculation input, compute and return result JSON."""
+        """Compute weekly work from JSON input, return result."""
         data = request.get_json()
-        # Delegate to existing logic — for now return placeholder
-        # Full implementation mirrors routes_calculator.py's /calculator/result
-        return jsonify({"status": "ok"})
+        employee_name = data.get("employee_name", "")
+        week_start_str = data.get("week_start_date", "")
+        normal_start = data.get("normal_start", "09:00")
+        normal_end = data.get("normal_end", "18:00")
+        days_data = data.get("days", [])
+
+        week_start_date = date.fromisoformat(week_start_str)
+
+        # Build DayWork list
+        days = []
+        for day_data in days_data:
+            current_date = date.fromisoformat(day_data["date"])
+            is_holiday = bool(day_data.get("is_holiday"))
+            is_off = bool(day_data.get("is_off"))
+
+            if is_off:
+                days.append(DayWork(current_date, [], is_holiday=is_holiday))
+                continue
+
+            segments = []
+            for seg in day_data.get("segments", []):
+                try:
+                    segments.append(WorkSegment(seg["start"], seg["end"], is_holiday=False))
+                except (ValueError, KeyError):
+                    abort(400, description=f"Invalid time format for {current_date}")
+
+            day_work = DayWork(current_date, segments, is_holiday=is_holiday)
+            day_work.memo = day_data.get("memo", "")
+            days.append(day_work)
+
+        week_work = WeekWork(week_start_date, days)
+        result = calculate_week_work(week_work, normal_start, normal_end)
+
+        # Attach input for display
+        result["_input"] = data
+        return jsonify(result)
 
     @app.route("/api/calculator/save", methods=["POST"])
     def api_calculator_save():
+        """Compute and save a weekly calculation."""
         data = request.get_json()
+        employee_name = data.get("employee_name", "")
+        week_start_str = data.get("week_start_date", "")
+        normal_start = data.get("normal_start", "09:00")
+        normal_end = data.get("normal_end", "18:00")
+        days_data = data.get("days", [])
+
+        week_start_date = date.fromisoformat(week_start_str)
+        week_end_date = week_start_date + timedelta(days=6)
+
+        # Build DayWork list
+        days = []
+        for day_data in days_data:
+            current_date = date.fromisoformat(day_data["date"])
+            is_holiday = bool(day_data.get("is_holiday"))
+            is_off = bool(day_data.get("is_off"))
+
+            if is_off:
+                days.append(DayWork(current_date, [], is_holiday=is_holiday))
+                continue
+
+            segments = []
+            for seg in day_data.get("segments", []):
+                try:
+                    segments.append(WorkSegment(seg["start"], seg["end"], is_holiday=False))
+                except (ValueError, KeyError):
+                    abort(400, description=f"Invalid time format for {current_date}")
+
+            day_work = DayWork(current_date, segments, is_holiday=is_holiday)
+            day_work.memo = day_data.get("memo", "")
+            days.append(day_work)
+
+        week_work = WeekWork(week_start_date, days)
+        result = calculate_week_work(week_work, normal_start, normal_end)
+
+        # Determine needs_review flag
+        needs_review = result.get("needs_review", False)
+
         input_json = json.dumps(data, ensure_ascii=False)
-        result_json = json.dumps({}, ensure_ascii=False)  # computed elsewhere
+        # Strip internal keys before saving
+        result_clean = {k: v for k, v in result.items() if not k.startswith("_")}
+        result_json = json.dumps(result_clean, ensure_ascii=False, default=str)
+
         save_weekly_calculation(
-            employee_name=data["employee_name"],
-            week_start_date=data["week_start_date"],
-            week_end_date="",
-            normal_start=data["normal_start"],
-            normal_end=data["normal_end"],
+            employee_name=employee_name,
+            week_start_date=week_start_date.isoformat(),
+            week_end_date=week_end_date.isoformat(),
+            normal_start=normal_start,
+            normal_end=normal_end,
             input_json=input_json,
             result_json=result_json,
+            needs_review=needs_review,
         )
-        return jsonify({"status": "saved"})
+
+        return jsonify({"status": "saved", "result": result_clean})
+
+    # --------------- Admin ---------------
 
     @app.route("/api/admin/login", methods=["POST"])
     def api_admin_login():
@@ -77,7 +162,6 @@ def register_api(app):
         if pw == ADMIN_PASSWORD:
             session["admin_ok"] = True
             return jsonify({"status": "ok"})
-        from flask import abort
         abort(401)
 
     @app.route("/api/admin/logout", methods=["POST"])
@@ -88,14 +172,12 @@ def register_api(app):
     @app.route("/api/admin/employees")
     def api_admin_employees():
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         return jsonify(get_employee_admin_list())
 
     @app.route("/api/admin/employees/add", methods=["POST"])
     def api_admin_add_employee():
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         name = request.get_json().get("employee_name", "").strip()
         if name:
@@ -105,15 +187,12 @@ def register_api(app):
     @app.route("/api/admin/employees/<int:employee_id>/delete", methods=["POST"])
     def api_admin_delete_employee(employee_id):
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         pw = request.get_json().get("password", "")
         if pw != ADMIN_PASSWORD:
-            from flask import abort
             abort(401)
         calc_count, trash_count = get_employee_usage_counts(employee_id)
         if calc_count > 0 or trash_count > 0:
-            from flask import abort
             abort(400, description="Employee has calculations")
         delete_employee_by_id(employee_id)
         return jsonify({"status": "ok"})
@@ -121,7 +200,6 @@ def register_api(app):
     @app.route("/api/admin/trash")
     def api_admin_trash():
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         rows = get_deleted_calculations()
         return jsonify([{
@@ -135,7 +213,6 @@ def register_api(app):
     @app.route("/api/admin/trash/<int:trash_id>/restore", methods=["POST"])
     def api_restore_trash(trash_id):
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         restore_deleted_calculation(trash_id)
         return jsonify({"status": "ok"})
@@ -143,7 +220,6 @@ def register_api(app):
     @app.route("/api/admin/trash/<int:trash_id>/purge", methods=["POST"])
     def api_purge_trash(trash_id):
         if not session.get("admin_ok"):
-            from flask import abort
             abort(401)
         purge_deleted_calculation(trash_id)
         return jsonify({"status": "ok"})
