@@ -1,12 +1,14 @@
 import os
 from pathlib import Path
 
-from flask import Flask, redirect, url_for
+from flask import Flask, redirect, url_for, send_from_directory, abort
 
 from routes_calculator import register as register_calculator
+from routes_api import register_api
 from config import DATA_DIR
 
 _SECRET_KEY_FILE = Path(DATA_DIR) / ".secret_key"
+_FRONTEND_DIST = Path(__file__).parent / "static" / "frontend"
 
 
 def _load_secret_key() -> str:
@@ -14,10 +16,8 @@ def _load_secret_key() -> str:
     env_key = os.environ.get("SECRET_KEY")
     if env_key:
         return env_key
-    # Try loading from file
     if _SECRET_KEY_FILE.exists():
         return _SECRET_KEY_FILE.read_text().strip()
-    # Generate and persist
     key = os.urandom(24).hex()
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
     _SECRET_KEY_FILE.write_text(key)
@@ -25,15 +25,26 @@ def _load_secret_key() -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=str(_FRONTEND_DIST), static_url_path="/static/frontend")
     app.secret_key = _load_secret_key()
 
-    # Calculator routes only
+    # Legacy Jinja2 routes (existing)
     register_calculator(app)
+    # New JSON API routes for React SPA
+    register_api(app)
 
     @app.route("/")
     def root():
         return redirect(url_for("employees"))
+
+    # SPA fallback: serve React index.html for client-side routes
+    @app.route("/<path:path>")
+    def spa_fallback(path):
+        if path.startswith("api/") or path.startswith("static/"):
+            abort(404)
+        if _FRONTEND_DIST.exists():
+            return send_from_directory(str(_FRONTEND_DIST), "index.html")
+        abort(404)
 
     return app
 
@@ -41,5 +52,4 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-    # 기본 포트 8888 (원본 프로젝트와 동일)
     app.run(host="0.0.0.0", port=8888, debug=True)
