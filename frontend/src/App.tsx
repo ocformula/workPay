@@ -12,8 +12,8 @@ import WorkLogPage from './pages/WorkLogPage'
 const { Header, Content } = Layout
 
 const navItems = [
-  { itemKey: '/employees', text: '직원 목록' },
-  { itemKey: '/worklog', text: '근무 로그' },
+  { itemKey: '/employees', text: '홈' },
+  { itemKey: '/worklog', text: '근무일지' },
   { itemKey: '/admin/login', text: '관리자' },
 ]
 
@@ -26,7 +26,7 @@ function App() {
         <Nav
           mode="horizontal"
           selectedKeys={[location.pathname]}
-          header={{ logo: <span style={{ fontWeight: 600, fontSize: 18 }}>WorkPay</span> }}
+          header={{ logo: <span style={{ fontWeight: 600, fontSize: 16 }}>WorkPay 주간 계산기</span> }}
           items={navItems}
         />
       </Header>
