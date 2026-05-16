@@ -8,7 +8,16 @@ from routes_api import register_api
 from config import DATA_DIR
 
 _SECRET_KEY_FILE = Path(DATA_DIR) / ".secret_key"
-_FRONTEND_DIST = Path(__file__).parent / "static" / "frontend"
+# Frontend dist candidates: Docker (src/static/frontend) or bare metal (../frontend/dist)
+_FRONTEND_DIST_CANDIDATES = [
+    Path(__file__).parent / "static" / "frontend",
+    Path(__file__).parent.parent / "frontend" / "dist",
+]
+
+
+def _get_frontend_dist() -> Path | None:
+    """Resolve frontend dist at runtime (handles late builds)."""
+    return next((p for p in _FRONTEND_DIST_CANDIDATES if p.exists()), None)
 
 
 def _load_secret_key() -> str:
@@ -25,7 +34,8 @@ def _load_secret_key() -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder=str(_FRONTEND_DIST) if _FRONTEND_DIST.exists() else None, static_url_path="/static/frontend")
+    fd = _get_frontend_dist()
+    app = Flask(__name__, static_folder=str(fd) if fd else None, static_url_path="/static/frontend")
     app.secret_key = _load_secret_key()
 
     MODE = os.environ.get("WORKPAY_MODE", "react")
@@ -42,8 +52,9 @@ def create_app() -> Flask:
         if MODE == "legacy":
             return redirect(url_for("employees"))
         # React SPA: serve index.html
-        if _FRONTEND_DIST.exists():
-            return send_from_directory(str(_FRONTEND_DIST), "index.html")
+        frontend = _get_frontend_dist()
+        if frontend:
+            return send_from_directory(str(frontend), "index.html")
         abort(404)
 
     # SPA fallback: serve React index.html for client-side routes
@@ -52,8 +63,9 @@ def create_app() -> Flask:
         def spa_fallback(path):
             if path.startswith("api/") or path.startswith("static/"):
                 abort(404)
-            if _FRONTEND_DIST.exists():
-                return send_from_directory(str(_FRONTEND_DIST), "index.html")
+            frontend = _get_frontend_dist()
+            if frontend:
+                return send_from_directory(str(frontend), "index.html")
             abort(404)
 
     return app
