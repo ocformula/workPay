@@ -1,7 +1,9 @@
 """REST API wrappers for the React SPA frontend."""
 import json
+import csv
+import io
 from datetime import date, datetime, time, timedelta
-from flask import jsonify, request, session, abort
+from flask import jsonify, request, session, abort, make_response
 
 from db import (
     get_employee_overview,
@@ -14,6 +16,8 @@ from db import (
     restore_deleted_calculation,
     purge_deleted_calculation,
     save_weekly_calculation,
+    get_calculation_by_id,
+    move_calculation_to_trash,
 )
 from calc_weekly import WeekWork, DayWork, WorkSegment, calculate_week_work
 from config import ADMIN_PASSWORD
@@ -49,8 +53,36 @@ def register_api(app):
                 "needs_review": bool(row["needs_review"]) if "needs_review" in row.keys() else False,
                 "auto_carryover": bool(inp.get("auto_carryover")),
                 "carryover_from": inp.get("carryover_from"),
+                "input_json": inp,
+                "result_json": result,
             })
         return jsonify(items)
+
+    @app.route("/api/employees/<employee_name>/<int:calc_id>")
+    def api_calculation_detail(employee_name, calc_id):
+        row = get_calculation_by_id(calc_id)
+        if not row or row["employee_name"] != employee_name:
+            abort(404)
+        result = json.loads(row["result_json"])
+        inp = json.loads(row["input_json"])
+        return jsonify({
+            "id": row["id"],
+            "week_start_date": row["week_start_date"],
+            "week_end_date": row["week_end_date"],
+            "normal_start": row["normal_start"],
+            "normal_end": row["normal_end"],
+            "created_at": row["created_at"],
+            "input": inp,
+            "result": result,
+        })
+
+    @app.route("/api/employees/<employee_name>/<int:calc_id>/delete", methods=["POST"])
+    def api_delete_calculation(employee_name, calc_id):
+        row = get_calculation_by_id(calc_id)
+        if not row or row["employee_name"] != employee_name:
+            abort(404)
+        move_calculation_to_trash(calc_id)
+        return jsonify({"status": "deleted"})
 
     # --------------- Calculator ---------------
 
@@ -66,7 +98,6 @@ def register_api(app):
 
         week_start_date = date.fromisoformat(week_start_str)
 
-        # Build DayWork list
         days = []
         for day_data in days_data:
             current_date = date.fromisoformat(day_data["date"])
@@ -90,8 +121,6 @@ def register_api(app):
 
         week_work = WeekWork(week_start_date, days)
         result = calculate_week_work(week_work, normal_start, normal_end)
-
-        # Attach input for display
         result["_input"] = data
         return jsonify(result)
 
@@ -108,7 +137,6 @@ def register_api(app):
         week_start_date = date.fromisoformat(week_start_str)
         week_end_date = week_start_date + timedelta(days=6)
 
-        # Build DayWork list
         days = []
         for day_data in days_data:
             current_date = date.fromisoformat(day_data["date"])
@@ -132,12 +160,9 @@ def register_api(app):
 
         week_work = WeekWork(week_start_date, days)
         result = calculate_week_work(week_work, normal_start, normal_end)
-
-        # Determine needs_review flag
         needs_review = result.get("needs_review", False)
 
         input_json = json.dumps(data, ensure_ascii=False)
-        # Strip internal keys before saving
         result_clean = {k: v for k, v in result.items() if not k.startswith("_")}
         result_json = json.dumps(result_clean, ensure_ascii=False, default=str)
 
@@ -153,6 +178,53 @@ def register_api(app):
         )
 
         return jsonify({"status": "saved", "result": result_clean})
+
+    @app.route("/api/calculator/export", methods=["POST"])
+    def api_calculator_export():
+        """Export calculation result to Excel."""
+        from openpyxl import Workbook
+
+        data = request.get_json()
+        result = data.get("result", {})
+        input_data = data.get("input", {})
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "계산결과"
+
+        # Header
+        ws.append([input_data.get("employee_name", ""), "주간 근무 계산 결과"])
+        ws.append([f"주차: {input_data.get('week_start_date', '')} ~ {data.get('week_end_date', '')}"])
+        ws.append([])
+
+        # Day results
+        ws.append(["요일", "일자", "근로(분)", "휴게(분)", "연장(분)", "1.5배", "2.0배", "2.5배"])
+        for day in result.get("day_results", []):
+            ws.append([
+                day.get("weekday", ""),
+                day.get("date", ""),
+                day.get("work_min", 0),
+                day.get("break_min", 0),
+                day.get("overtime_min", 0),
+                day.get("bucket_15_min", 0),
+                day.get("bucket_20_min", 0),
+                day.get("bucket_25_min", 0),
+            ])
+
+        ws.append([])
+        ws.append(["총계", "", result.get("week_total_min", 0), "", "",
+                    result.get("bucket_15_total", 0), result.get("bucket_20_total", 0),
+                    result.get("bucket_25_total", 0)])
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        resp = make_response(output.getvalue())
+        resp.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"workpay_{input_data.get('employee_name', '')}_{input_data.get('week_start_date', '')}.xlsx"
+        resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename}"
+        return resp
 
     # --------------- Admin ---------------
 

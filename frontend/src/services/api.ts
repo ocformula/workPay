@@ -7,6 +7,7 @@ const api = axios.create({
 export interface Employee {
   name: string
   calc_count: number
+  latest_ym: string
 }
 
 export interface CalculationItem {
@@ -23,6 +24,8 @@ export interface CalculationItem {
   needs_review: boolean
   auto_carryover: boolean
   carryover_from?: string
+  input_json?: object
+  result_json?: object
 }
 
 export interface CalcInput {
@@ -37,6 +40,52 @@ export interface CalcInput {
     memo: string
     segments: Array<{ start: string; end: string }>
   }>
+}
+
+export interface CalcResult {
+  week_total_min: number
+  bucket_15_total: number
+  bucket_20_total: number
+  bucket_25_total: number
+  needs_review: boolean
+  day_results: Array<{
+    date: string
+    weekday: string
+    work_min: number
+    break_min: number
+    overtime_min: number
+    bucket_15_min: number
+    bucket_20_min: number
+    bucket_25_min: number
+    is_off: boolean
+    is_holiday: boolean
+    segments?: Array<{ start: string; end: string }>
+    display_segments?: Array<{ start: string; end: string }>
+    timeline?: Array<{
+      kind: string
+      label: string
+      original_kind?: string
+      original_calculation?: string
+    }>
+  }>
+  [key: string]: any
+}
+
+export interface CalculationDetail {
+  id: number
+  week_start_date: string
+  week_end_date: string
+  normal_start: string
+  normal_end: string
+  created_at: string
+  input: CalcInput
+  result: CalcResult
+}
+
+export interface ExportPayload {
+  input: CalcInput
+  result: CalcResult
+  week_end_date: string
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {
@@ -55,6 +104,22 @@ export async function submitCalculation(data: CalcInput) {
 
 export async function saveCalculation(data: CalcInput) {
   return api.post('/calculator/save', data)
+}
+
+export async function fetchCalculationDetail(name: string, calcId: number): Promise<CalculationDetail> {
+  const res = await api.get(`/employees/${encodeURIComponent(name)}/${calcId}`)
+  return res.data
+}
+
+export async function deleteCalculation(name: string, calcId: number) {
+  return api.post(`/employees/${encodeURIComponent(name)}/${calcId}/delete`)
+}
+
+export async function exportCalculation(data: ExportPayload): Promise<Blob> {
+  const res = await api.post('/calculator/export', data, {
+    responseType: 'blob',
+  })
+  return res.data
 }
 
 export async function loginAdmin(password: string) {
