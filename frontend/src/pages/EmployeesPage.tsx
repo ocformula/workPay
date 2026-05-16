@@ -45,7 +45,7 @@ function EmployeesPage() {
                 <Select
                   style={{ width: '100%' }}
                   value={selectedName}
-                  onChange={setSelectedName}
+                  onChange={(v) => setSelectedName(typeof v === 'string' ? v : '')}
                 >
                   {employees.map(emp => (
                     <Select.Option key={emp.name} value={emp.name}>{emp.name}</Select.Option>
