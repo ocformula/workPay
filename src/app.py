@@ -25,26 +25,36 @@ def _load_secret_key() -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder=str(_FRONTEND_DIST), static_url_path="/static/frontend")
+    app = Flask(__name__, static_folder=str(_FRONTEND_DIST) if _FRONTEND_DIST.exists() else None, static_url_path="/static/frontend")
     app.secret_key = _load_secret_key()
 
-    # Legacy Jinja2 routes (existing)
-    register_calculator(app)
-    # New JSON API routes for React SPA
-    register_api(app)
+    MODE = os.environ.get("WORKPAY_MODE", "react")
+
+    if MODE == "legacy":
+        # Legacy Jinja2 routes (existing)
+        register_calculator(app)
+    else:
+        # New JSON API routes for React SPA
+        register_api(app)
 
     @app.route("/")
     def root():
-        return redirect(url_for("employees"))
-
-    # SPA fallback: serve React index.html for client-side routes
-    @app.route("/<path:path>")
-    def spa_fallback(path):
-        if path.startswith("api/") or path.startswith("static/"):
-            abort(404)
+        if MODE == "legacy":
+            return redirect(url_for("employees"))
+        # React SPA: serve index.html
         if _FRONTEND_DIST.exists():
             return send_from_directory(str(_FRONTEND_DIST), "index.html")
         abort(404)
+
+    # SPA fallback: serve React index.html for client-side routes
+    if MODE == "react":
+        @app.route("/<path:path>")
+        def spa_fallback(path):
+            if path.startswith("api/") or path.startswith("static/"):
+                abort(404)
+            if _FRONTEND_DIST.exists():
+                return send_from_directory(str(_FRONTEND_DIST), "index.html")
+            abort(404)
 
     return app
 
